@@ -52,16 +52,16 @@ int main (int argc, char* argv[])
   char metaname[256];
   sprintf(metaname, "scratch/%d", rank);
 
-  redset_filelist* list = redset_filelist_create(metaname, &d);
+  redset_apply(1, filelist, metaname, &d);
+
+  redset_filelist* list = redset_filelist_get(metaname, &d);
   int count = redset_filelist_count(list);
   int i;
   for (i = 0; i < count; i++) {
     const char* name = redset_filelist_file(list, i);
     printf("%d: %d - %s\n", rank, i, name);
   }
-  redset_filelist_free(&list);
-
-  redset_apply(1, filelist, metaname, &d);
+  redset_filelist_release(&list);
 
   redset_delete(&d);
 

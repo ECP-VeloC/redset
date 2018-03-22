@@ -77,17 +77,17 @@ int redset_unapply_xor(
 );
 
 
-redset_filelist* redset_filelist_single(
+redset_filelist* redset_filelist_get_single(
   const char* name,
   redset* d
 );
 
-redset_filelist* redset_filelist_partner(
+redset_filelist* redset_filelist_get_partner(
   const char* name,
   redset* d
 );
 
-redset_filelist* redset_filelist_xor(
+redset_filelist* redset_filelist_get_xor(
   const char* name,
   redset* d
 );

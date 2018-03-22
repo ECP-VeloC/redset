@@ -765,7 +765,7 @@ int redset_unapply_xor(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_xor(
+redset_filelist* redset_filelist_get_xor(
   const char* name,
   redset* d)
 {

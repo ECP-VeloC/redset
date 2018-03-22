@@ -1150,13 +1150,13 @@ static int redset_from_dir(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_create(
+redset_filelist* redset_filelist_get(
   const char* name,
   redset* d)
 {
   /* build redundancy descriptor from name */
   //redset d;
-  //redset_from_dir(dir, name, &d);
+  //redset_from_dir(name, &d);
 
   /* create a temporary file list to record files from redundancy scheme */
   redset_filelist* tmp = NULL;
@@ -1164,13 +1164,13 @@ redset_filelist* redset_filelist_create(
   /* get files added by redundancy method */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
-    tmp = redset_filelist_single(name, d);
+    tmp = redset_filelist_get_single(name, d);
     break;
   case REDSET_COPY_PARTNER:
-    tmp = redset_filelist_partner(name, d);
+    tmp = redset_filelist_get_partner(name, d);
     break;
   case REDSET_COPY_XOR:
-    tmp = redset_filelist_xor(name, d);
+    tmp = redset_filelist_get_xor(name, d);
     break;
   }
 
@@ -1191,7 +1191,7 @@ redset_filelist* redset_filelist_create(
   }
 
   /* free the temporary list */
-  redset_filelist_free(&tmp);
+  redset_filelist_release(&tmp);
 
   /* free the descriptor */
   //redset_free(&d);
@@ -1204,7 +1204,7 @@ redset_filelist* redset_filelist_create(
   return list;
 }
 
-int redset_filelist_free(redset_filelist** plist)
+int redset_filelist_release(redset_filelist** plist)
 {
   if (plist == NULL) {
     return REDSET_SUCCESS;
