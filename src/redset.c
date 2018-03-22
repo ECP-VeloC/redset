@@ -523,31 +523,23 @@ int redset_create(
     break;
   case REDSET_COPY_PARTNER:
     /* dup the communicator across failure groups */
-    redset_split_across(
-      comm, newcomm, &d->comm
-    );
+    redset_split_across(comm, newcomm, &d->comm);
     break;
   case REDSET_COPY_XOR:
     /* split the communicator across nodes based on xor set size
      * to create our xor communicator */
     /* split comm world across failure groups */
-    redset_split_across(
-      comm, newcomm, &comm_across
-    );
+    redset_split_across(comm, newcomm, &comm_across);
 
     /* get our rank and the number of ranks in this communicator */
     MPI_Comm_rank(comm_across, &rank_across);
     MPI_Comm_size(comm_across, &ranks_across);
 
     /* identify which group we're in */
-    redset_group_id(
-      rank_across, ranks_across, set_size, &split_id
-    );
+    redset_group_id(rank_across, ranks_across, set_size, &split_id);
 
     /* split communicator into sets */
-    MPI_Comm_split(
-      comm_across, split_id, redset_rank, &d->comm
-    );
+    MPI_Comm_split(comm_across, split_id, redset_rank, &d->comm);
 
     /* free the temporary communicator */
     MPI_Comm_free(&comm_across);
@@ -567,9 +559,7 @@ int redset_create(
 
   /* count the number of groups */
   int group_master = (d->rank == 0) ? 1 : 0;
-  MPI_Allreduce(
-    &group_master, &d->groups, 1, MPI_INT, MPI_SUM, comm
-  );
+  MPI_Allreduce(&group_master, &d->groups, 1, MPI_INT, MPI_SUM, comm);
 
   /* fill in state struct depending on copy type */
   switch (d->type) {
@@ -582,6 +572,9 @@ int redset_create(
     redset_create_xor(comm, d);
     break;
   }
+
+  /* free communicator of all procs in the same group */
+  MPI_Comm_free(&newcomm);
 
   return REDSET_SUCCESS;
 }
