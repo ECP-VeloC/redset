@@ -1042,16 +1042,15 @@ int redset_recover(
 {
   MPI_Comm comm_world = redset_comm;
 
+  /* initialize the descriptor */
+  redset_initialize(d);
+
   /* reapply encoding to redundancy descriptor */
   int rc = redset_recover_reddesc(name, d);
 
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
     /* at least one process failed to rebuild its redundancy information */
-    if (rc == REDSET_SUCCESS) {
-      /* free our descriptor if we were successful */
-      redset_delete(d);
-    }
     return REDSET_FAILURE;
   }
 
@@ -1071,7 +1070,6 @@ int redset_recover(
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
     /* at least one process failed to rebuild its data */
-    redset_delete(d);
     return REDSET_FAILURE;
   }
 
