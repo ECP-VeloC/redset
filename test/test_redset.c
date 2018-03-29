@@ -213,11 +213,11 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
     }
 
     rc = check_for_redundancy_files(mode, path, &d);
+  }
 
-    if (redset_delete(&d) != REDSET_SUCCESS) {
-      printf("ERROR: failed to delete redundancy descriptor\n");
-      rc = 1;
-    }
+  if (redset_delete(&d) != REDSET_SUCCESS) {
+    printf("ERROR: failed to delete redundancy descriptor\n");
+    rc = 1;
   }
 
   return rc;
