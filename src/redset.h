@@ -15,6 +15,8 @@
 #include "mpi.h"
 #include "kvtree.h"
 
+#define REDSET_SUCCESS (0)
+
 #define REDSET_COPY_NULL    (0)
 #define REDSET_COPY_SINGLE  (1)
 #define REDSET_COPY_PARTNER (2)

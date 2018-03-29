@@ -4,7 +4,6 @@
 #include "mpi.h"
 #include "kvtree.h"
 
-#define REDSET_SUCCESS (0)
 #define REDSET_FAILURE (1)
 
 #define REDSET_MAX_FILENAME (1024)

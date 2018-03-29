@@ -21,6 +21,7 @@
 #include "mpi.h"
 #include "kvtree.h"
 
+#include "redset.h"
 #include "redset_util.h"
 
 #define REDSET_VERSION "1.0"

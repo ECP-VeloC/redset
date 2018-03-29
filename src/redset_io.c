@@ -45,6 +45,8 @@
 /* gettimeofday */
 #include <sys/time.h>
 
+#include "redset.h"
+
 #define REDSET_OPEN_TRIES (5)
 #define REDSET_OPEN_USLEEP (1000)
 
