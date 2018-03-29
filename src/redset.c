@@ -899,6 +899,7 @@ static int redset_recover_reddesc(
       kvtree* desc_copy = kvtree_new();
       kvtree_merge(desc_copy, desc_hash);
       kvtree_setf(send_hash, desc_copy, "%d", rank);
+//      kvtree_exchange_sendq(send_hash, rank, desc_hash);
     }
   }
 
@@ -1022,9 +1023,9 @@ int redset_apply(
     if (time_diff > 0) {
       bytes / (1024.0 * 1024.0 * time_diff);
     }
-    printf("redset_apply: %f secs, %e bytes, %f MB/s, %f MB/s per proc",
-            time_diff, bytes, bw, bw/(double)nranks_world
-    );
+    //printf("redset_apply: %f secs, %e bytes, %f MB/s, %f MB/s per proc\n",
+    //        time_diff, bytes, bw, bw/(double)nranks_world
+    //);
 
     // TODO: log or report cost somewhere
   }
