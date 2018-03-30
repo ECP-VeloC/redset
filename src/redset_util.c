@@ -28,7 +28,6 @@
 
 int redset_debug = 1;
 
-MPI_Comm redset_comm = MPI_COMM_NULL;
 int redset_rank = -1;
 char* redset_hostname = NULL;
 

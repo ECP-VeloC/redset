@@ -166,7 +166,7 @@ int test_recover_no_loss(int mode, const char* path, int filecount, const char**
   int rc = 0;
 
   redset d;
-  int redset_rc = redset_recover(path, &d);
+  int redset_rc = redset_recover(comm, path, &d);
   if (! alltrue(redset_rc == REDSET_SUCCESS, comm)) {
     printf("ERROR: recover failed\n");
     rc = 1;
@@ -198,7 +198,7 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
   }
 
   redset d;
-  int redset_rc = redset_recover(path, &d);
+  int redset_rc = redset_recover(comm, path, &d);
   int recovered = alltrue(redset_rc == REDSET_SUCCESS, comm);
 
   if (mode == REDSET_COPY_SINGLE) {

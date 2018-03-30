@@ -309,7 +309,7 @@ int ER_Dispatch(int set_id)
 
       /* rebuild files */
       redset d;
-      if (redset_recover(proc_name, &d) != REDSET_SUCCESS) {
+      if (redset_recover(MPI_COMM_WORLD, proc_name, &d) != REDSET_SUCCESS) {
         /* rebuild failed */
         rc = ER_FAILURE;
       }

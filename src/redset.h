@@ -32,6 +32,7 @@ typedef struct {
   int      enabled;        /* flag indicating whether this descriptor is active */
   int      type;           /* redundancy scheme to apply */
   void*    state;          /* pointer to extra state depending on copy type */
+  MPI_Comm parent_comm;    /* parent communicator */
   MPI_Comm comm;           /* communicator holding procs for this scheme */
   int      groups;         /* number of redundancy sets */
   int      group_id;       /* unique id assigned to this redundancy set */
@@ -88,23 +89,6 @@ int redset_delete(
   redset* d
 );
 
-/* convert the specified redundancy descritpor into a corresponding
- * kvtree */
-int redset_store_to_kvtree(
-  const redset* d,
-  kvtree* kv
-);
-
-/* build a redundancy descriptor corresponding to the specified kvtree,
- * this function is collective, it differs from create_from_kvtree in
- * that it uses group id and group rank values to restore a descriptor
- * that was previously created */
-int redset_restore_from_kvtree(
-  MPI_Comm comm,
-  const kvtree* kv,
-  redset* d
-);
-
 /* apply redundancy scheme to file and return number of bytes copied
  * in bytes parameter */
 int redset_apply(
@@ -117,6 +101,7 @@ int redset_apply(
 /* rebuilds files for specified dataset id using specified redundancy descriptor,
  * adds them to filemap, and returns REDSET_SUCCESS if all processes succeeded */
 int redset_recover(
+  MPI_Comm comm,
   const char* name,
   redset* d
 );

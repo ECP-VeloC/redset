@@ -346,7 +346,7 @@ int redset_recover_partner_rebuild(
 {
   int i;
   int rc = REDSET_SUCCESS;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* pick out communicator */
   MPI_Comm comm = d->comm;
@@ -732,7 +732,7 @@ int redset_recover_partner(
 {
   int i;
   int rc = REDSET_SUCCESS;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* get name of partner file */
   char partner_file[REDSET_MAX_FILENAME];

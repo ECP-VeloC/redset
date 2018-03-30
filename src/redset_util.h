@@ -8,7 +8,6 @@
 
 #define REDSET_MAX_FILENAME (1024)
 
-extern MPI_Comm redset_comm;
 extern int redset_rank;
 extern char* redset_hostname;
 

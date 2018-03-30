@@ -65,7 +65,7 @@ int redset_apply_single(
   const redset* d)
 {
   int i;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* get name of this process */
   int rank_world;
@@ -126,7 +126,7 @@ int redset_recover_single(
   int i;
   int rc = REDSET_SUCCESS;
 
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* get name of this process (use rank in COMM_WORLD for now) */
   int rank_world;

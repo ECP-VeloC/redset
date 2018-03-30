@@ -4,6 +4,22 @@
 #include "kvtree.h"
 #include "redset.h"
 
+/* convert the specified redundancy descritpor into a corresponding
+ * kvtree */
+int redset_store_to_kvtree(
+  const redset* d,
+  kvtree* kv
+);
+
+/* build a redundancy descriptor corresponding to the specified kvtree,
+ * this function is collective, it differs from create_from_kvtree in
+ * that it uses group id and group rank values to restore a descriptor
+ * that was previously created */
+int redset_restore_from_kvtree(
+  const kvtree* kv,
+  redset* d
+);
+
 int redset_encode_reddesc_single(
   kvtree* hash,
   const char* name,

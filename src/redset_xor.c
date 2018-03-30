@@ -644,7 +644,7 @@ int redset_recover_xor(
   const redset* d)
 {
   int i;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* set chunk filenames of form: xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
   char xor_file[REDSET_MAX_FILENAME];
@@ -740,7 +740,7 @@ int redset_recover_xor(
 
     /* rebuild */
     if (need_rebuild) {
-      redset_dbg(1, "Rebuilding file from XOR segments");
+      redset_dbg(2, "Rebuilding file from XOR segments");
     }
     rc = redset_recover_xor_rebuild(name, d, rebuild_rank);
   }

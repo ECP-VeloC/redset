@@ -39,12 +39,8 @@ int redset_init()
   /* set MPI buffer size */
   redset_mpi_buf_size = 1024 * 1024;
 
-  /* TODO: allow caller to specify process group some other way */
-  /* duplicate communicator */
-  MPI_Comm_dup(MPI_COMM_WORLD, &redset_comm);
-
   /* set our global rank */
-  MPI_Comm_rank(redset_comm, &redset_rank);
+  MPI_Comm_rank(MPI_COMM_WORLD, &redset_rank);
 
   return REDSET_SUCCESS;
 }
@@ -52,7 +48,6 @@ int redset_init()
 int redset_finalize()
 {
   redset_free(&redset_hostname);
-  MPI_Comm_free(&redset_comm);
   return REDSET_SUCCESS;
 }
 
@@ -129,6 +124,7 @@ static int redset_initialize(redset* d)
   d->enabled        =  0;
   d->type           = REDSET_COPY_NULL;
   d->state          = NULL;
+  d->parent_comm    = MPI_COMM_NULL;
   d->comm           = MPI_COMM_NULL;
   d->groups         =  0;
   d->group_id       = -1;
@@ -320,6 +316,9 @@ int redset_delete(redset* d)
   }
 
   /* free the communicator we created */
+  if (d->parent_comm != MPI_COMM_NULL) {
+    MPI_Comm_free(&d->parent_comm);
+  }
   if (d->comm != MPI_COMM_NULL) {
     MPI_Comm_free(&d->comm);
   }
@@ -506,6 +505,9 @@ int redset_create(
   /* record type of descriptor */
   d->type = type;
 
+  /* dup the parent communicator */
+  MPI_Comm_dup(comm, &d->parent_comm);
+
   /* split procs from comm into sub communicators based on group_name */
   MPI_Comm newcomm;
   int groups, group_id;
@@ -627,38 +629,17 @@ int redset_store_to_kvtree(const redset* d, kvtree* hash)
 /* build a redundancy descriptor corresponding to the specified kvtree,
  * this function is collective, it is the opposite of store_to_kvtree */
 int redset_restore_from_kvtree(
-  MPI_Comm comm,
   const kvtree* hash,
   redset* d)
 {
   int rc = REDSET_SUCCESS;
 
-  /* check that we got a valid redundancy descriptor */
-  if (d == NULL) {
-    printf("No redundancy descriptor to fill from hash @ %s:%d",
-      __FILE__, __LINE__
-    );
-    rc = REDSET_FAILURE;
-  }
-
-  /* check that we got a valid pointer to a hash */
-  if (hash == NULL) {
-    printf("No hash specified to build redundancy descriptor from @ %s:%d",
-      __FILE__, __LINE__
-    );
-    rc = REDSET_FAILURE;
-  }
-
-  /* check that everyone made it this far */
-  if (! redset_alltrue(rc == REDSET_SUCCESS, comm)) {
-    if (d != NULL) {
-      d->enabled = 0;
-    }
-    return REDSET_FAILURE;
-  }
-
-  /* initialize the descriptor */
-  redset_initialize(d);
+  /* it's required that the caller has already initialized the descriptor
+   * and dupped the parent comm before calling this function, if we expose
+   * this function to the user we should revisit this interface */
+  // redset_initialize(d);
+  // MPI_Comm_dup(comm, &d->parent_comm);
+  MPI_Comm comm = d->parent_comm;
 
   /* enable / disable the descriptor */
   d->enabled = 1;
@@ -810,7 +791,7 @@ static int redset_encode_reddesc(
 {
   /* get name of this process */
   int rank_world;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
   MPI_Comm_rank(comm_world, &rank_world);
 
   /* allocate a structure to record meta data about our files and redundancy descriptor */
@@ -867,9 +848,11 @@ static int redset_recover_reddesc(
   const char* name,
   redset* d)
 {
+  /* get parent communicator (set by caller) */
+  MPI_Comm comm_world = d->parent_comm;
+
   /* get name of this process */
   int rank_world;
-  MPI_Comm comm_world = redset_comm;
   MPI_Comm_rank(comm_world, &rank_world);
 
   /* read meta data from file */
@@ -927,7 +910,7 @@ static int redset_recover_reddesc(
   kvtree* desc_hash = kvtree_elem_hash(desc_elem);
 
   /* rebuild the redundancy descriptor for this dataset */
-  redset_restore_from_kvtree(comm_world, desc_hash, d);
+  redset_restore_from_kvtree(desc_hash, d);
 
   /* can free our hashes now that we've rebuilt our redundancy descriptor */
   kvtree_delete(&recv_hash);
@@ -949,7 +932,7 @@ int redset_apply(
   const redset* d)
 {
   int i;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   int rank_world, nranks_world;
   MPI_Comm_rank(comm_world, &rank_world);
@@ -1037,13 +1020,17 @@ int redset_apply(
  * returns REDSET_SUCCESS if successful, REDSET_FAILURE otherwise,
  * the same return code is returned to all processes */
 int redset_recover(
+  MPI_Comm comm,
   const char* name,
   redset* d)
 {
-  MPI_Comm comm_world = redset_comm;
-
-  /* initialize the descriptor */
+  /* initialize the descriptor, we do this so that it's always safe for
+   * the user to delete it whether we succeed or fail here */
   redset_initialize(d);
+
+  /* create temporary communicator so as not to trample on user's comm */
+  MPI_Comm_dup(comm, &d->parent_comm);
+  MPI_Comm comm_world = d->parent_comm;
 
   /* reapply encoding to redundancy descriptor */
   int rc = redset_recover_reddesc(name, d);
@@ -1083,7 +1070,7 @@ int redset_unapply(
   redset* d)
 {
   int rc;
-  MPI_Comm comm_world = redset_comm;
+  MPI_Comm comm_world = d->parent_comm;
 
   /* now recover data using redundancy scheme, if necessary */
   switch (d->type) {
@@ -1117,12 +1104,12 @@ int redset_unapply(
 }
 
 static int redset_from_dir(
+  MPI_Comm comm_world,
   const char* name, 
   redset* d)
 {
   /* get name of this process */
   int rank;
-  MPI_Comm comm_world = redset_comm;
   MPI_Comm_rank(comm_world, &rank);
 
   char rankstr[100];
@@ -1138,7 +1125,7 @@ static int redset_from_dir(
   kvtree* desc_hash = kvtree_get_kv(hash, rankstr, "DESC");
 
   /* rebuild the redundancy descriptor for this dataset */
-  int rc = redset_restore_from_kvtree(comm_world, desc_hash, d);
+  int rc = redset_restore_from_kvtree(desc_hash, d);
 
   /* free the hash */
   kvtree_delete(&hash);
