@@ -24,11 +24,12 @@
 #include "redset_io.h"
 #include "redset_util.h"
 #include "redset.h"
+#include "redset_internal.h"
 
 /* set partner filename */
 static void redset_build_partner_filename(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   char* file, 
   size_t len)
 {
@@ -38,7 +39,7 @@ static void redset_build_partner_filename(
 /* returns 1 if we successfully read a partner file, 0 otherwise */
 static int redset_read_partner_file(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   kvtree* header)
 {
   /* get partner filename */
@@ -65,7 +66,7 @@ static int redset_read_partner_file(
 int redset_encode_reddesc_partner(
   kvtree* hash,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 
@@ -87,7 +88,7 @@ int redset_apply_partner(
   int numfiles,
   const char** files,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int i;
   int rc = REDSET_SUCCESS;
@@ -341,7 +342,7 @@ static int redset_partner_check_files(const kvtree* hash)
 
 int redset_recover_partner_rebuild(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   int have_my_files)
 {
   int i;
@@ -728,7 +729,7 @@ int redset_recover_partner_rebuild(
 
 int redset_recover_partner(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int i;
   int rc = REDSET_SUCCESS;
@@ -774,7 +775,7 @@ int redset_recover_partner(
 
 int redset_unapply_partner(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* get name of partner file */
   char partner_file[REDSET_MAX_FILENAME];
@@ -786,13 +787,13 @@ int redset_unapply_partner(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_get_partner(
+redset_list* redset_filelist_get_partner(
   const char* name,
-  redset* d)
+  redset_base* d)
 {
   char file[REDSET_MAX_FILENAME];
   redset_build_partner_filename(name, d, file, sizeof(file));
-  redset_filelist* list = (redset_filelist*) REDSET_MALLOC(sizeof(redset_filelist));
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);

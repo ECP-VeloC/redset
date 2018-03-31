@@ -110,7 +110,7 @@ Redundancy descriptor functions
 */
 
 /* initialize the specified redundancy descriptor */
-static int redset_initialize(redset* d)
+static int redset_initialize(redset_base* d)
 {
   /* check that we got a valid redundancy descriptor */
   if (d == NULL) {
@@ -136,7 +136,7 @@ static int redset_initialize(redset* d)
 
 /* given a redundancy descriptor with all top level fields filled in
  * allocate and fill in structure for partner specific fields in state */
-static int redset_create_partner(MPI_Comm parent_comm, redset* d)
+static int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 
@@ -185,7 +185,7 @@ static int redset_create_partner(MPI_Comm parent_comm, redset* d)
 
 /* given a redundancy descriptor with all top level fields filled in
  * allocate and fill in structure for xor specific fields in state */
-static int redset_create_xor(MPI_Comm parent_comm, redset* d)
+static int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 
@@ -268,7 +268,7 @@ static int redset_create_xor(MPI_Comm parent_comm, redset* d)
   return rc;
 }
 
-static int redset_delete_partner(redset* d)
+static int redset_delete_partner(redset_base* d)
 {
   redset_partner* state = (redset_partner*) d->state;
   if (state != NULL) {
@@ -282,7 +282,7 @@ static int redset_delete_partner(redset* d)
   return REDSET_SUCCESS;
 }
 
-static int redset_delete_xor(redset* d)
+static int redset_delete_xor(redset_base* d)
 {
   redset_xor* state = (redset_xor*) d->state;
   if (state != NULL) {
@@ -301,8 +301,11 @@ static int redset_delete_xor(redset* d)
 
 /* free any memory associated with the specified redundancy
  * descriptor */
-int redset_delete(redset* d)
+int redset_delete(redset* dvp)
 {
+  /* get pointer to redset structure */
+  redset_base* d = (redset_base*) *dvp;
+
   /* free off copy type specific data */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
@@ -323,6 +326,9 @@ int redset_delete(redset* d)
     MPI_Comm_free(&d->comm);
   }
 
+  /* free the redset structure and set caller's pointer to NULL */
+  redset_free(dvp);
+
   return REDSET_SUCCESS;
 }
 
@@ -341,7 +347,7 @@ int redset_delete(redset* d)
 
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
-int redset_to_kvtree(const redset* d, kvtree* hash)
+int redset_to_kvtree(const redset_base* d, kvtree* hash)
 {
   /* check that we got a valid pointer to a redundancy descriptor and
    * a hash */
@@ -487,8 +493,14 @@ int redset_create(
   int type,
   MPI_Comm comm,
   const char* group_name,
-  redset* d)
+  redset* dvp)
 {
+  /* allocate a new redset structure */
+  redset_base* d = (redset_base*) REDSET_MALLOC(sizeof(redset_base));
+
+  /* set caller's pointer to record address of redset structure */
+  *dvp = (void*) d;
+
   int SET_SIZE = 8;
 
   int rc = REDSET_SUCCESS;
@@ -583,7 +595,7 @@ int redset_create(
 
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
-int redset_store_to_kvtree(const redset* d, kvtree* hash)
+int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
 {
   /* check that we got a valid pointer to a redundancy descriptor and
    * a hash */
@@ -630,7 +642,7 @@ int redset_store_to_kvtree(const redset* d, kvtree* hash)
  * this function is collective, it is the opposite of store_to_kvtree */
 int redset_restore_from_kvtree(
   const kvtree* hash,
-  redset* d)
+  redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 
@@ -756,7 +768,7 @@ int redset_bool_have_files(
   int numfiles,
   const char** files,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* check the integrity of each of the files */
   int missing_a_file = 0;
@@ -787,7 +799,7 @@ static int redset_build_filename(
 /* encode redundancy descriptor and write to a file */
 static int redset_encode_reddesc(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* get name of this process */
   int rank_world;
@@ -834,7 +846,7 @@ static int redset_encode_reddesc(
 /* delete files added in encode_reddesc */
 static int redset_unencode_reddesc(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* delete meta data file */
   char filename[REDSET_MAX_FILENAME];
@@ -846,7 +858,7 @@ static int redset_unencode_reddesc(
 /* attempt to recover and rebuild redundancy descriptor information */
 static int redset_recover_reddesc(
   const char* name,
-  redset* d)
+  redset_base* d)
 {
   /* get parent communicator (set by caller) */
   MPI_Comm comm_world = d->parent_comm;
@@ -929,9 +941,13 @@ int redset_apply(
   int numfiles,
   const char** files,
   const char* name,
-  const redset* d)
+  const redset dvp)
 {
   int i;
+
+  /* get pointer to redset structure */
+  redset_base* d = (redset_base*) dvp;
+
   MPI_Comm comm_world = d->parent_comm;
 
   int rank_world, nranks_world;
@@ -1022,8 +1038,14 @@ int redset_apply(
 int redset_recover(
   MPI_Comm comm,
   const char* name,
-  redset* d)
+  redset* dvp)
 {
+  /* allocate a new redset structure */
+  redset_base* d = (redset_base*) REDSET_MALLOC(sizeof(redset_base));
+
+  /* set caller's pointer to record address of redset structure */
+  *dvp = (void*) d;
+
   /* initialize the descriptor, we do this so that it's always safe for
    * the user to delete it whether we succeed or fail here */
   redset_initialize(d);
@@ -1067,9 +1089,13 @@ int redset_recover(
  * which is useful when cleaning up */
 int redset_unapply(
   const char* name,
-  redset* d)
+  const redset dvp)
 {
   int rc;
+
+  /* get pointer to redset structure */
+  redset_base* d = (redset_base*) dvp;
+
   MPI_Comm comm_world = d->parent_comm;
 
   /* now recover data using redundancy scheme, if necessary */
@@ -1106,7 +1132,7 @@ int redset_unapply(
 static int redset_from_dir(
   MPI_Comm comm_world,
   const char* name, 
-  redset* d)
+  redset_base* d)
 {
   /* get name of this process */
   int rank;
@@ -1134,16 +1160,19 @@ static int redset_from_dir(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_get(
+redset_filelist redset_filelist_get(
   const char* name,
-  redset* d)
+  const redset dvp)
 {
+  /* get pointer to redset structure */
+  redset_base* d = (redset_base*) dvp;
+
   /* build redundancy descriptor from name */
   //redset d;
   //redset_from_dir(name, &d);
 
   /* create a temporary file list to record files from redundancy scheme */
-  redset_filelist* tmp = NULL;
+  redset_list* tmp = NULL;
 
   /* get files added by redundancy method */
   switch (d->type) {
@@ -1175,26 +1204,27 @@ redset_filelist* redset_filelist_get(
   }
 
   /* free the temporary list */
-  redset_filelist_release(&tmp);
+  redset_filelist listvp = tmp;
+  redset_filelist_release(&listvp);
 
   /* free the descriptor */
   //redset_free(&d);
 
   /* update fields of return list */
-  redset_filelist* list = (redset_filelist*) REDSET_MALLOC(sizeof(redset_filelist));
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
   list->count = count;
   list->files = files;
 
   return list;
 }
 
-int redset_filelist_release(redset_filelist** plist)
+int redset_filelist_release(redset_filelist* plist)
 {
   if (plist == NULL) {
     return REDSET_SUCCESS;
   }
 
-  redset_filelist* list = *plist;
+  redset_list* list = (redset_list*) *plist;
 
   /* check that we got a list */
   if (list == NULL) {
@@ -1217,8 +1247,10 @@ int redset_filelist_release(redset_filelist** plist)
 }
 
 /* returns the number of files in the list */
-int redset_filelist_count(redset_filelist* list)
+int redset_filelist_count(redset_filelist listvp)
 {
+  redset_list* list = (redset_list*) listvp;
+
   /* check that we got a list */
   if (list == NULL) {
     return 0;
@@ -1230,8 +1262,10 @@ int redset_filelist_count(redset_filelist* list)
 /* returns the name of the file by the given index,
  * index should be between 0 and count-1,
  * returns NULL if index is invalid */
-const char* redset_filelist_file(redset_filelist* list, int index)
+const char* redset_filelist_file(redset_filelist listvp, int index)
 {
+  redset_list* list = (redset_list*) listvp;
+
   /* check that we got a list */
   if (list == NULL) {
     return NULL;

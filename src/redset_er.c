@@ -288,7 +288,7 @@ int ER_Dispatch(int set_id)
           snprintf(proc_name, sizeof(proc_name), "%s/%d", dir, rank);
 
           /* apply redundancy */
-          if (redset_apply(num_files, filenames, proc_name, d) != REDSET_SUCCESS) {
+          if (redset_apply(num_files, filenames, proc_name, *d) != REDSET_SUCCESS) {
             /* failed to apply redundancy descriptor */
             rc = ER_FAILURE;
           }

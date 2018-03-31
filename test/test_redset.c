@@ -58,12 +58,12 @@ void delete_files(int count, const char** filelist)
 }
 
 /* check that we have each redundancy file */
-int check_for_redundancy_files(int mode, const char* path, redset* d)
+int check_for_redundancy_files(int mode, const char* path, redset d)
 {
   int rc = 0;
 
   /* get list of redundancy files */
-  redset_filelist* list = redset_filelist_get(path, d);
+  redset_filelist list = redset_filelist_get(path, d);
   if (list == NULL) {
     printf("ERROR: Failed to get list of redundancy files\n");
     return 1;
@@ -98,7 +98,7 @@ int check_for_redundancy_files(int mode, const char* path, redset* d)
 }
 
 /* apply redundancy descriptor and check that redundancy files are created */
-int test_apply(int mode, int filecount, const char** filelist, const char* path, redset* d, MPI_Comm comm)
+int test_apply(int mode, int filecount, const char** filelist, const char* path, redset d, MPI_Comm comm)
 {
   int rc = 0;
 
@@ -114,7 +114,7 @@ int test_apply(int mode, int filecount, const char** filelist, const char* path,
 }
 
 /* unapply redundancy descriptor and check that redundancy files are gone */
-int test_unapply(int mode, const char* path, redset* d, MPI_Comm comm)
+int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
 {
   int rc = 0;
 
@@ -125,7 +125,7 @@ int test_unapply(int mode, const char* path, redset* d, MPI_Comm comm)
   }
 
   /* get list of redundancy files */
-  redset_filelist* list = redset_filelist_get(path, d);
+  redset_filelist list = redset_filelist_get(path, d);
   if (list == NULL) {
     printf("ERROR: Failed to get list of redundancy files\n");
     return 1;
@@ -172,7 +172,7 @@ int test_recover_no_loss(int mode, const char* path, int filecount, const char**
     rc = 1;
   }
 
-  rc = check_for_redundancy_files(mode, path, &d);
+  rc = check_for_redundancy_files(mode, path, d);
 
   if (redset_delete(&d) != REDSET_SUCCESS) {
     printf("ERROR: failed to delete redundancy descriptor\n");
@@ -212,7 +212,7 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
       rc = 1;
     }
 
-    rc = check_for_redundancy_files(mode, path, &d);
+    rc = check_for_redundancy_files(mode, path, d);
   }
 
   if (redset_delete(&d) != REDSET_SUCCESS) {
@@ -230,13 +230,13 @@ void test_sequence(int copymode, const char* group, int filecount, const char** 
   redset d;
   redset_create(copymode, MPI_COMM_WORLD, group, &d);
 
-  test_apply(copymode, filecount, filelist, prefix, &d, MPI_COMM_WORLD);
+  test_apply(copymode, filecount, filelist, prefix, d, MPI_COMM_WORLD);
 
   test_recover_no_loss(copymode, prefix, filecount, filelist, MPI_COMM_WORLD);
 
   test_recover_loss_one_rank(copymode, prefix, filecount, filelist, MPI_COMM_WORLD);
 
-  test_unapply(copymode, prefix, &d, MPI_COMM_WORLD);
+  test_unapply(copymode, prefix, d, MPI_COMM_WORLD);
 
   redset_delete(&d);
 

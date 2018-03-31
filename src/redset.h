@@ -28,41 +28,8 @@ Define redundancy descriptor structure
 =========================================
 */
 
-typedef struct {
-  int      enabled;        /* flag indicating whether this descriptor is active */
-  int      type;           /* redundancy scheme to apply */
-  void*    state;          /* pointer to extra state depending on copy type */
-  MPI_Comm parent_comm;    /* parent communicator */
-  MPI_Comm comm;           /* communicator holding procs for this scheme */
-  int      groups;         /* number of redundancy sets */
-  int      group_id;       /* unique id assigned to this redundancy set */
-  int      ranks;          /* number of ranks in this set */
-  int      rank;           /* caller's rank within its set */
-} redset;
-
-typedef struct {
-  int       lhs_rank;       /* rank which is one less (with wrap to highest) within set */
-  int       lhs_rank_world; /* rank of lhs process in comm world */
-  char*     lhs_hostname;   /* hostname of lhs process */
-  int       rhs_rank;       /* rank which is one more (with wrap to lowest) within set */
-  int       rhs_rank_world; /* rank of rhs process in comm world */
-  char*     rhs_hostname;   /* hostname of rhs process */
-} redset_partner;
-
-typedef struct {
-  kvtree*   group_map;      /* kvtree that maps group rank to world rank */
-  int       lhs_rank;       /* rank which is one less (with wrap to highest) within set */
-  int       lhs_rank_world; /* rank of lhs process in comm world */
-  char*     lhs_hostname;   /* hostname of lhs process */
-  int       rhs_rank;       /* rank which is one more (with wrap to lowest) within set */
-  int       rhs_rank_world; /* rank of rhs process in comm world */
-  char*     rhs_hostname;   /* hostname of rhs process */
-} redset_xor;
-
-typedef struct {
-  int count;
-  const char** files;
-} redset_filelist;
+typedef void* redset;
+typedef void* redset_filelist;
 
 /*
 =========================================
@@ -95,7 +62,7 @@ int redset_apply(
   int numfiles,       /* IN - number of file names in files array */
   const char** files, /* IN - list of file names of length numfiles */
   const char* name,   /* IN - path/filename prefix to prepend to redset metadata files */
-  const redset* d     /* IN - redundancy decriptor to be applied */
+  const redset d      /* IN - redundancy decriptor to be applied */
 );
 
 /* rebuilds files for specified dataset id using specified redundancy descriptor,
@@ -110,30 +77,30 @@ int redset_recover(
  * which is useful when cleaning up */
 int redset_unapply(
   const char* name, /* IN - path/filename prefix to prepend to redset metadata files */
-  redset* d         /* IN - redundancy descriptor associated with above path */
+  const redset d    /* IN - redundancy descriptor associated with above path */
 );
 
 /* return list of files added by redundancy scheme */
-redset_filelist* redset_filelist_get(
+redset_filelist redset_filelist_get(
   const char* name, /* IN - path/filename prefix to prepend to redset metadata files */
-  redset* d         /* IN - redundancy descriptor associated with above path */
+  const redset d    /* IN - redundancy descriptor associated with above path */
 );
 
 /* free file list allocated by call to redset_filelist_get */
 int redset_filelist_release(
-  redset_filelist** plist /* INOUT - address of pointer to list to be freed, sets pointer to NULL */
+  redset_filelist* plist /* INOUT - address of pointer to list to be freed, sets pointer to NULL */
 );
 
 /* return number of files in file list */
 int redset_filelist_count(
-  redset_filelist* list /* IN - list of redundancy files */
+  redset_filelist list /* IN - list of redundancy files */
 );
 
 /* return name of file at specified index, where
  * 0 <= index < count and count is value returned by redset_filelist_count */
 const char* redset_filelist_file(
-  redset_filelist* list, /* IN - list of redundancy files */
-  int index              /* IN - index into list, ranges from 0 to list count - 1 */
+  redset_filelist list, /* IN - list of redundancy files */
+  int index             /* IN - index into list, ranges from 0 to list count - 1 */
 );
 
 #define ER_SUCCESS (0)

@@ -42,7 +42,7 @@
 /* set partner filename */
 static void redset_build_single_filename(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   char* file, 
   size_t len)
 {
@@ -52,7 +52,7 @@ static void redset_build_single_filename(
 int redset_encode_reddesc_single(
   kvtree* hash,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* nothing more to add for single */
   return REDSET_SUCCESS;
@@ -62,7 +62,7 @@ int redset_apply_single(
   int numfiles,
   const char** files,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int i;
   MPI_Comm comm_world = d->parent_comm;
@@ -121,7 +121,7 @@ int redset_apply_single(
 
 int redset_recover_single(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int i;
   int rc = REDSET_SUCCESS;
@@ -212,7 +212,7 @@ int redset_recover_single(
 
 int redset_unapply_single(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   char filename[REDSET_MAX_FILENAME];
   redset_build_single_filename(name, d, filename, sizeof(filename));
@@ -221,13 +221,13 @@ int redset_unapply_single(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_get_single(
+redset_list* redset_filelist_get_single(
   const char* name,
-  redset* d)
+  redset_base* d)
 {
   char file[REDSET_MAX_FILENAME];
   redset_build_single_filename(name, d, file, sizeof(file));
-  redset_filelist* list = (redset_filelist*) REDSET_MALLOC(sizeof(redset_filelist));
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);

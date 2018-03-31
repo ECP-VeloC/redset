@@ -24,6 +24,7 @@
 #include "redset_io.h"
 #include "redset_util.h"
 #include "redset.h"
+#include "redset_internal.h"
 
 #define REDSET_KEY_COPY_XOR_CURRENT "CURRENT"
 #define REDSET_KEY_COPY_XOR_PARTNER "PARTNER"
@@ -41,7 +42,7 @@ Distribute and file rebuild functions
 /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
 static int redset_build_xor_filename(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   char* file, 
   size_t len)
 {
@@ -52,7 +53,7 @@ static int redset_build_xor_filename(
  * sets xor_file to full filename */
 static int redset_read_xor_file(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   kvtree* header)
 {
   /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
@@ -79,7 +80,7 @@ static int redset_read_xor_file(
 int redset_encode_reddesc_xor(
   kvtree* hash,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 
@@ -102,7 +103,7 @@ int redset_apply_xor(
   int numfiles,
   const char** files,
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int rc = REDSET_SUCCESS;
   int i;
@@ -311,7 +312,7 @@ int redset_apply_xor(
  * rebuild files and add them to the filemap */
 int redset_recover_xor_rebuild(
   const char* name,
-  const redset* d,
+  const redset_base* d,
   int root)
 {
   int rc = REDSET_SUCCESS;
@@ -641,7 +642,7 @@ int redset_recover_xor_rebuild(
 /* given a dataset id, check whether files can be rebuilt via xor and execute the rebuild if needed */
 int redset_recover_xor(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   int i;
   MPI_Comm comm_world = d->parent_comm;
@@ -755,7 +756,7 @@ int redset_recover_xor(
 
 int redset_unapply_xor(
   const char* name,
-  const redset* d)
+  const redset_base* d)
 {
   /* get name of xor file */
   char file[REDSET_MAX_FILENAME];
@@ -765,13 +766,13 @@ int redset_unapply_xor(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist* redset_filelist_get_xor(
+redset_list* redset_filelist_get_xor(
   const char* name,
-  redset* d)
+  redset_base* d)
 {
   char file[REDSET_MAX_FILENAME];
   redset_build_xor_filename(name, d, file, sizeof(file));
-  redset_filelist* list = (redset_filelist*) REDSET_MALLOC(sizeof(redset_filelist));
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);
