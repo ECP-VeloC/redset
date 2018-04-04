@@ -17,10 +17,10 @@
 #include <unistd.h>
 
 #include "mpi.h"
-#include "mpi_rank_str.h"
 
 #include "kvtree.h"
 #include "kvtree_util.h"
+#include "rankstr_mpi.h"
 
 #include "redset_util.h"
 #include "redset.h"
@@ -522,9 +522,7 @@ int redset_create(
 
   /* split procs from comm into sub communicators based on group_name */
   MPI_Comm newcomm;
-  int groups, group_id;
-  mpi_rank_str(comm, group_name, &groups, &group_id);
-  MPI_Comm_split(comm, group_id, 0, &newcomm);
+  rankstr_mpi_comm_split(d->parent_comm, group_name, 0, 0, 1, &newcomm);
 
   /* build the communicator based on the copy type
    * and other parameters */
