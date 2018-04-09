@@ -20,11 +20,13 @@
 
 #include "kvtree.h"
 #include "kvtree_util.h"
+#include "kvtree_mpi.h"
 #include "rankstr_mpi.h"
 
 #include "redset_util.h"
 #include "redset.h"
 #include "redset_internal.h"
+#include "redset_io.h"
 
 int redset_init()
 {
@@ -503,8 +505,6 @@ int redset_create(
 
   int SET_SIZE = 8;
 
-  int rc = REDSET_SUCCESS;
-
   /* initialize the descriptor */
   redset_initialize(d);
 
@@ -642,8 +642,6 @@ int redset_restore_from_kvtree(
   const kvtree* hash,
   redset_base* d)
 {
-  int rc = REDSET_SUCCESS;
-
   /* it's required that the caller has already initialized the descriptor
    * and dupped the parent comm before calling this function, if we expose
    * this function to the user we should revisit this interface */
@@ -953,7 +951,6 @@ int redset_apply(
   MPI_Comm_size(comm_world, &nranks_world);
 
   /* start timer */
-  time_t timestamp_start;
   double time_start;
   if (rank_world == 0) {
     time_start = MPI_Wtime();
@@ -964,7 +961,6 @@ int redset_apply(
 
   /* step through each of my files for the specified dataset
    * to scan for any incomplete files */
-  int valid = 1;
   double my_bytes = 0.0;
   for (i = 0; i < numfiles; i++) {
     /* get file name of this file */
@@ -1018,7 +1014,7 @@ int redset_apply(
     double time_diff = time_end - time_start;
     double bw = 0.0;
     if (time_diff > 0) {
-      bytes / (1024.0 * 1024.0 * time_diff);
+      bw = bytes / (1024.0 * 1024.0 * time_diff);
     }
     //printf("redset_apply: %f secs, %e bytes, %f MB/s, %f MB/s per proc\n",
     //        time_diff, bytes, bw, bw/(double)nranks_world

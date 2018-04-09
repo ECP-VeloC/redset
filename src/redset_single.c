@@ -15,9 +15,11 @@
 #include "mpi.h"
 
 #include "kvtree.h"
+#include "kvtree_util.h"
 
 #include "redset_util.h"
 #include "redset.h"
+#include "redset_io.h"
 #include "redset_internal.h"
 
 /* Produces a metadata file to track info about files.
@@ -80,7 +82,6 @@ int redset_apply_single(
   /* step through each of my files for the specified dataset
    * to scan for any incomplete files */
   /* enter index, name, and size of each file */
-  int valid = 1;
   double my_bytes = 0.0;
   kvtree* files_hash = kvtree_set(current_hash, "FILE", kvtree_new());
   for (i = 0; i < numfiles; i++) {

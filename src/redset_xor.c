@@ -20,6 +20,8 @@
 #include "mpi.h"
 
 #include "kvtree.h"
+#include "kvtree_util.h"
+#include "kvtree_mpi.h"
 
 #include "redset_io.h"
 #include "redset_util.h"
@@ -40,7 +42,7 @@ Distribute and file rebuild functions
 */
 
 /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
-static int redset_build_xor_filename(
+static void redset_build_xor_filename(
   const char* name,
   const redset_base* d,
   char* file, 

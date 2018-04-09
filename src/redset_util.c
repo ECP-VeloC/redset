@@ -34,8 +34,6 @@ char* redset_hostname = NULL;
 int redset_mpi_buf_size;
 size_t redset_page_size;
 
-static int redset_crc_on_copy = 0;
-
 /* print error message to stdout */
 void redset_err(const char *fmt, ...)
 {
