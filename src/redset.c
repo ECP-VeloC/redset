@@ -159,13 +159,11 @@ static int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
   if (state->lhs_hostname == NULL ||
       state->rhs_hostname == NULL ||
       strcmp(state->lhs_hostname, "") == 0 ||
-      strcmp(state->rhs_hostname, "") == 0 ||
-      strcmp(state->lhs_hostname, redset_hostname) == 0 ||
-      strcmp(state->rhs_hostname, redset_hostname) == 0)
+      strcmp(state->rhs_hostname, "") == 0)
   {
     /* disable this descriptor */
     d->enabled = 0;
-    redset_warn("Failed to find partner processes for redundancy descriptor, disabling, too few nodes? @ %s:%d",
+    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
       __FILE__, __LINE__
     );
     rc = REDSET_FAILURE;
@@ -249,13 +247,11 @@ static int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
   if (state->lhs_hostname == NULL ||
       state->rhs_hostname == NULL ||
       strcmp(state->lhs_hostname, "") == 0 ||
-      strcmp(state->rhs_hostname, "") == 0 ||
-      strcmp(state->lhs_hostname, redset_hostname) == 0 ||
-      strcmp(state->rhs_hostname, redset_hostname) == 0)
+      strcmp(state->rhs_hostname, "") == 0)
   {
     /* disable this descriptor */
     d->enabled = 0;
-    redset_warn("Failed to find partner processes for redundancy descriptor, disabling, too few nodes? @ %s:%d",
+    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
       __FILE__, __LINE__
     );
     rc = REDSET_FAILURE;
