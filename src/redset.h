@@ -4,6 +4,11 @@
 #include "mpi.h"
 #include "kvtree.h"
 
+/* enable C++ codes to include this header directly */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define REDSET_SUCCESS (0)
 
 #define REDSET_COPY_NULL    (0)
@@ -91,5 +96,10 @@ const char* redset_filelist_file(
   redset_filelist list, /* IN - list of redundancy files */
   int index             /* IN - index into list, ranges from 0 to list count - 1 */
 );
+
+/* enable C++ codes to include this header directly */
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* REDSET_H */
