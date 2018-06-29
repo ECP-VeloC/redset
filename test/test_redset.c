@@ -267,7 +267,7 @@ int main (int argc, char* argv[])
 
   redset_init();
 
-  char hostname[HOST_NAME_MAX + 1];
+  char hostname[1024];
   gethostname(hostname, sizeof(hostname));
 
   test_sequence(REDSET_COPY_SINGLE,  hostname, filecount, filelist, prefix);

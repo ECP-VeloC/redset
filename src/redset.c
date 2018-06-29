@@ -17,10 +17,12 @@
 #include "redset_internal.h"
 #include "redset_io.h"
 
+#define REDSET_HOSTNAME (255)
+
 int redset_init()
 {
   /* read our hostname */
-  char hostname[HOST_NAME_MAX + 1];
+  char hostname[REDSET_HOSTNAME + 1];
   gethostname(hostname, sizeof(hostname));
   redset_hostname = strdup(hostname);
 

@@ -7,7 +7,6 @@
 #define REDSET_FAILURE (1)
 
 #define REDSET_MAX_FILENAME (1024)
-#define HOST_NAME_MAX (1024)
 
 extern int redset_rank;
 extern char* redset_hostname;
