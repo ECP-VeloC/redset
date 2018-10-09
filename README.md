@@ -5,14 +5,14 @@ which then may be applied to a set of files distributed across a group of proces
 Usage is documented in [src/redset.h](src/redset.h) and [doc/rst/redset.rst](doc/rst/redset.rst).
 Also see the example program in the [test](test) directory.
 
-Implementation details can be found in [doc/rst/implementation.rst](doc/rst/implementation.rst).
+Implementation details can be found in [doc/rst/implementation.rst](doc/rst/implementation.rst) and [doc/rst/schemes.rst](doc/rst/schemes.rst).
 
 # Building
 
 To build dependencies:
 
-    git clone git@github.com:LLNL/KVTree.git KVTree.git
-    git clone git@xgitlab.cels.anl.gov:ecp-veloc/rankstr.git rankstr.git
+    git clone git@github.com:ECP-VeloC/KVTree.git  KVTree.git
+    git clone git@github.com:ECP-VeloC/rankstr.git rankstr.git
 
     mkdir install
 
@@ -36,14 +36,16 @@ To build dependencies:
 
 To build redset:
 
-    cmake -DCMAKE_BUILD_TYPE=Debug -DWITH_KVTREE_PREFIX=`pwd`/install -DWITH_RANKSTR_PREFIX=`pwd`/install .
+    cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=./install -DWITH_KVTREE_PREFIX=`pwd`/install -DWITH_RANKSTR_PREFIX=`pwd`/install .
+    make
+    make install
 
 # Testing
 Some simple test programs exist in the test directory.
 
 To build a test for the redset API:
 
-    mpicc -g -O0 -o test_redset test_redset.c -I../install/include -L../install/lib64 -lkvtree -lrankstr -I../src -L../src -ler
+    mpicc -g -O0 -o test_redset test_redset.c -I../install/include -L../install/lib64 -lkvtree -lrankstr -I../src -L../src -lredset
 
 ## Release
 

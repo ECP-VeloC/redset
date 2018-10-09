@@ -18,8 +18,6 @@ This scheme is also useful when writing to highly reliable storage.
 
 PARTNER
 +++++++
-TODO: This scheme assumes node-local storage.
-
 With PARTNER a full copy of every file is made.
 The partner process is always selected from a different failure group,
 so that it's unlikely for a process and its partner to fail at the same time.
@@ -40,10 +38,60 @@ When applying the redundancy scheme,
 each process sends its files to its right neighbor.
 The meta data for each file is transferred and stored,
 as well as, the redundancy descriptor kvtree for the process.
-Each process writes the copies to the same directory
-in which it wrote its own original files.
-Note that if a process and its partner share access to the
-same storage, then this scheme should not be used.
+
+All data is stored in a single partner file.
+The redundancy descriptor for the process and its left partner
+are written as a kvtree in a header of the partner file.
+All file data is then appended as binary data.
+
+An example of the header kvtree is shown below::
+
+  PARTNER
+    DESC
+      ENABLED
+        1
+      TYPE
+        PARTNER
+      GROUPS
+        1
+      GROUP
+        0
+      RANKS
+        4
+      RANK
+        3
+    FILES
+      1
+    FILE
+      0
+        ./testfile_3.out
+          SIZE
+            27
+  CURRENT
+    DESC
+      ENABLED
+        1
+      TYPE
+        PARTNER
+      GROUPS
+        1
+      GROUP
+        0
+      RANKS
+        4
+      RANK
+        0
+    FILES
+      1
+    FILE
+      0
+        ./testfile_0.out
+          SIZE
+            27
+
+The partner file is named of the form::
+
+  <prefix><rank_in_parent>.partner.redset
 
 XOR
 +++
@@ -62,19 +110,19 @@ The process whose rank in the set is one less than the rank of the current proce
 and the process whose rank is one more is the right neighbor.
 The last rank wraps back to the first to form a ring.
 At run time, the library caches the XOR set in the MPI communicator associated with a redundancy descriptor.
-Each process also caches information abouts its left and right neighbor processes in the redundancy descriptor.
+Each process also caches information about its left and right neighbor processes in the redundancy descriptor.
 
 XOR algorithm
 -------------
 The XOR redundancy scheme applies the algorithm described in [Gropp]_ (which is based on [Patterson]_).
 Assuming that each process writes one file and that the files on all processes are the same size,
-this algorithm is illustrated in Figure [fig-xor]_.
+this algorithm is illustrated in Figure :ref:`fig-xor`.
 Given N processes in the set, each file is logically partitioned into N-1 chunks,
 and an empty, zero-padded chunk is logically inserted into the file at alternating positions depending on the rank of the process.
 Then a reduce-scatter is computed across the set of logical files.
 The resulting chunk from this reduce-scatter is the data that the process stores in its XOR file.
 
-.. [Ross] "Providing Efficient I/O Redundancy in MPI Environments", William Gropp, Robert Ross, and Neill Miller, Lecture Notes in Computer Science, 3241:7786, September 2004. 11th European PVM/MPI Users Group Meeting, 2004.
+.. [Gropp] "Providing Efficient I/O Redundancy in MPI Environments", William Gropp, Robert Ross, and Neill Miller, Lecture Notes in Computer Science, 3241:7786, September 2004. 11th European PVM/MPI Users Group Meeting, 2004.
 
 .. [Patterson] "A Case for Redundant Arrays of Inexpensive Disks (RAID)", D Patterson, G Gibson, and R Katz, Proc. of 1988 ACM SIGMOD Conf. on Management of Data, 1988.
 
@@ -85,7 +133,7 @@ The resulting chunk from this reduce-scatter is the data that the process stores
    XOR Reduce Scatter
 
 In general, different processes may write different numbers of files, and file sizes may be arbitrary.
-In Figure [fig-xor_general]_,  we illustrate how to extend the algorithm for the general case.
+In Figure :ref:`fig-xor_general`,  we illustrate how to extend the algorithm for the general case.
 First, we logically concatenate all of the files a process writes into a single file.
 We then compute the minimum chunk size such that N-1 chunks are equal to or larger than the largest logical file.
 Finally, we pad the end of each logical file with zeros,
@@ -116,7 +164,7 @@ For an efficient reduce-scatter implementation, we use an algorithm that achieve
   - Evenly distributes the work among all processes in the set.
   - Structures communication so that a process always receives data from its left neighbor and sends data to its right neighbor.
     This is useful to eliminate network contention.
-  - Only reads data from each checkpoint file once, and only writes data to the XOR file once.
+  - Only reads data from each file once, and only writes data to the XOR file once.
     This minimizes file accesses, which may be slow.
   - Operates on the data in small pieces, so that the working set fits within the processor's cache.
 
@@ -124,12 +172,12 @@ To accomplish this, we divide each chunk into a series of smaller pieces, and we
 In the first phase, we compute the reduce-scatter result for the first piece of all chunks.
 Then, in the second phase, we compute the reduce-scatter result for the second piece of all chunks, and so on.
 In each phase, the reduce-scatter computation is pipelined among the processes.
-The first phase of this reduce-scatter algorithm is illustrated in Figure [fig-reduce_scatter]_.
+The first phase of this reduce-scatter algorithm is illustrated in Figure :ref:`fig-reduce_scatter`.
 This algorithm is implemented in redset_apply_xor() in redset_xor.c.
 
 .. figure:: fig/reduce_scatter.png
 
-   XOR reduce-scatter implementation
+   Pipelined XOR reduce-scatter implementation
 
 XOR file
 --------
@@ -143,27 +191,6 @@ in the header of the XOR file written by the process's right neighbor.
 This way, redset can recover all meta data even if one XOR file is lost.
 An example header is shown below::
 
-  DSET
-    COMPLETE
-      1
-    SIZE
-      2097182
-    FILES
-      4
-    ID
-      6
-    NAME
-      scr.dataset.6
-    CREATED
-      1312850690668536
-    USER
-      user1
-    JOBNAME
-      simulation123
-    JOBID
-      112573
-    CKPT
-      6
   RANKS
     4
   GROUP
@@ -180,64 +207,58 @@ An example header is shown below::
         3
   CHUNK
     174766
-  CURRENT
-    RANK
-      3
-    FILES
-      1
-    FILE
-      0
-        FILE
-          rank_3.ckpt
-        TYPE
-          FULL
-        RANKS
-          4
-        ORIG
-          rank_3.ckpt
-        PATH
-          /p/lscratchb/user1/simulation123
-        NAME
-          rank_3.ckpt
-        SIZE
-          524297
-        COMPLETE
-          1
   PARTNER
-    RANK
-      2
+    DESC
+      ENABLED
+        1
+      TYPE
+        XOR
+      GROUPS
+        1
+      GROUP
+        0
+      RANKS
+        4
+      RANK
+        3
     FILES
       1
     FILE
       0
-        FILE
-          rank_2.ckpt
-        TYPE
-          FULL
-        RANKS
-          4
-        ORIG
-          rank_2.ckpt
-        PATH
-          /p/lscratchb/user1/simulation123
-        NAME
-          rank_2.ckpt
-        SIZE
-          524296
-        COMPLETE
-          1
+        rank_2.ckpt
+          SIZE
+            524296
+  CURRENT
+    DESC
+      ENABLED
+        1
+      TYPE
+        XOR
+      GROUPS
+        1
+      GROUP
+        0
+      RANKS
+        4
+      RANK
+        0
+    FILES
+      1
+    FILE
+      0
+        rank_3.ckpt
+          SIZE
+            524297
 
-The topmost DSET field records the dataset descriptor the XOR file belongs to,
-and the topmost RANKS field records the number of ranks in the run (i.e., the size of the parent communicator).
+The topmost RANKS field records the number of ranks in the run (i.e., the size of the parent communicator).
 The GROUP kvtree records the set of processes in the XOR set.
 The number of processes in the set is listed under the RANKS field,
 and a mapping of a process's rank in the group to its rank in the parent communicator is stored under the RANK kvtree.
 The size of the XOR chunk in number of bytes is specified in the CHUNK field.
 
-Then, the meta data for the checkpoint files written by the process are recorded under the CURRENT kvtree,
-and a copy of the meta data for the checkpoint files written by the left neighbor are recorded under the PARTNER kvtree.
-Each kvtree records the rank of the process (in its parent communicator) under RANK,
-the number of checkpoint files the process wrote under FILES,
+Then, the meta data for the files written by the process are recorded under the CURRENT kvtree,
+and a copy of the meta data for the files written by the left neighbor are recorded under the PARTNER kvtree.
+Each kvtree records the number of files the process wrote under FILES
 and a ordered list of meta data for each file under the FILE kvtree.
 Each file is assigned an integer index, counting up from 0,
 which specifies the order in which the files were logically concatenated to compute the XOR chunk.
@@ -252,7 +273,7 @@ To select this id, redset computes the minimum rank in its parent communicator o
 redset then incorporates a process's rank within its set, the size of its set, and its set id into its file name,
 such that the XOR file name is of the form::
 
-  <grouprank+1>_of_<groupsize>_in_<groupid>.xor
+  <prefix><rank_in_parent>.xor.<groupid>_<grouprank+1>_of_<groupsize>.redset
 
 XOR rebuild
 -----------
@@ -265,8 +286,8 @@ redset implements a reduction algorithm that achieves the same goals as the redu
 Namely, the implementation attempts to distribute work evenly among all processes,
 minimize network contention, and minimize file accesses.
 This algorithm is implemented in redset_recover_xor() in redset_xor.c.
-An example is illustrated in Figure [fig-xor_reduce]_.
+An example is illustrated in Figure :ref:`fig-xor_reduce`.
 
-.. figure:: fig/xor_general.png
+.. figure:: fig/xor_reduce.png
 
-   Extension to multiple files
+   Pipelined XOR reduction to root
