@@ -122,10 +122,6 @@ and an empty, zero-padded chunk is logically inserted into the file at alternati
 Then a reduce-scatter is computed across the set of logical files.
 The resulting chunk from this reduce-scatter is the data that the process stores in its XOR file.
 
-.. [Gropp] "Providing Efficient I/O Redundancy in MPI Environments", William Gropp, Robert Ross, and Neill Miller, Lecture Notes in Computer Science, 3241:7786, September 2004. 11th European PVM/MPI Users Group Meeting, 2004.
-
-.. [Patterson] "A Case for Redundant Arrays of Inexpensive Disks (RAID)", D Patterson, G Gibson, and R Katz, Proc. of 1988 ACM SIGMOD Conf. on Management of Data, 1988.
-
 .. _fig-xor:
 
 .. figure:: fig/xor.png
@@ -133,12 +129,14 @@ The resulting chunk from this reduce-scatter is the data that the process stores
    XOR Reduce Scatter
 
 In general, different processes may write different numbers of files, and file sizes may be arbitrary.
-In Figure :ref:`fig-xor_general`,  we illustrate how to extend the algorithm for the general case.
+In Figure :ref:`fig-xor-general`,  we illustrate how to extend the algorithm for the general case.
 First, we logically concatenate all of the files a process writes into a single file.
 We then compute the minimum chunk size such that N-1 chunks are equal to or larger than the largest logical file.
 Finally, we pad the end of each logical file with zeros,
 such that each logical file extends to the number of bytes contained in N-1 chunks.
 This extension is efficient when all processes write about the same amount of data.
+
+.. _fig-xor-general:
 
 .. figure:: fig/xor_general.png
 
@@ -172,8 +170,10 @@ To accomplish this, we divide each chunk into a series of smaller pieces, and we
 In the first phase, we compute the reduce-scatter result for the first piece of all chunks.
 Then, in the second phase, we compute the reduce-scatter result for the second piece of all chunks, and so on.
 In each phase, the reduce-scatter computation is pipelined among the processes.
-The first phase of this reduce-scatter algorithm is illustrated in Figure :ref:`fig-reduce_scatter`.
+The first phase of this reduce-scatter algorithm is illustrated in Figure :ref:`fig-reduce-scatter`.
 This algorithm is implemented in redset_apply_xor() in redset_xor.c.
+
+.. _fig-reduce-scatter:
 
 .. figure:: fig/reduce_scatter.png
 
@@ -286,8 +286,14 @@ redset implements a reduction algorithm that achieves the same goals as the redu
 Namely, the implementation attempts to distribute work evenly among all processes,
 minimize network contention, and minimize file accesses.
 This algorithm is implemented in redset_recover_xor() in redset_xor.c.
-An example is illustrated in Figure :ref:`fig-xor_reduce`.
+An example is illustrated in Figure :ref:`fig-xor-reduce`.
+
+.. _fig-xor-reduce:
 
 .. figure:: fig/xor_reduce.png
 
    Pipelined XOR reduction to root
+
+.. [Gropp] "Providing Efficient I/O Redundancy in MPI Environments", William Gropp, Robert Ross, and Neill Miller, Lecture Notes in Computer Science, 3241:7786, September 2004. 11th European PVM/MPI Users Group Meeting, 2004.
+
+.. [Patterson] "A Case for Redundant Arrays of Inexpensive Disks (RAID)", D Patterson, G Gibson, and R Katz, Proc. of 1988 ACM SIGMOD Conf. on Management of Data, 1988.
