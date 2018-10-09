@@ -351,12 +351,12 @@ int redset_recover_partner_rebuild(
   int need_files = (have_my_files == 0);
   int lhs_need_files, rhs_need_files;
   MPI_Sendrecv(
-    &need_files,     1, MPI_INT, state->lhs_rank, 0,
+    &need_files,     1, MPI_INT, state->rhs_rank, 0,
     &lhs_need_files, 1, MPI_INT, state->lhs_rank, 0,
     comm, &status
   );
   MPI_Sendrecv(
-    &need_files,     1, MPI_INT, state->rhs_rank, 0,
+    &need_files,     1, MPI_INT, state->lhs_rank, 0,
     &rhs_need_files, 1, MPI_INT, state->rhs_rank, 0,
     comm, &status
   );
