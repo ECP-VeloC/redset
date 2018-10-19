@@ -24,7 +24,11 @@ static void redset_build_partner_filename(
   char* file, 
   size_t len)
 {
-  snprintf(file, len, "%s.partner.redset", name);
+  /* get pointer to partner state structure */
+  int rank;
+  MPI_Comm_rank(d->comm, &rank);
+  redset_partner* state = (redset_partner*) d->state;
+  snprintf(file, len, "%s.partner.%d_%d_%d.redset", name, state->lhs_rank_world, rank, state->rhs_rank_world);
 }
 
 /* returns 1 if we successfully read a partner file, 0 otherwise */
