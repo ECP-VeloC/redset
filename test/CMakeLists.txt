@@ -2,24 +2,13 @@
 # Build tests
 ###############
 
-LIST(APPEND er_test_srcs
-    test_redset.c
-    test_er.c
-)
-
-ADD_EXECUTABLE(test_er ${er_test_srcs})
-TARGET_LINK_LIBRARIES(test_er er kvtree)
-
 ################
 # Add tests to ctest
 ################
 
-# rountdrip tests
-ADD_TEST(roundtrip_tests test_er)
-
-# print test script
-FIND_PROGRAM(PRINT_TEST ${CMAKE_CURRENT_SOURCE_DIR}/print_test)
-# ADD_TEST(NAME print_test COMMAND ${PRINT_TEST} ${PROJECT_BINARY_DIR}/src/kvtree_print_file ${CMAKE_CURRENT_SOURCE_DIR}/files)
+ADD_EXECUTABLE(redset_test test_redset.c)
+TARGET_LINK_LIBRARIES(redset_test ${SPATH_EXTERNAL_LIBS} redset)
+ADD_TEST(NAME redset_test COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 2 -N2 ./redset_test)
 
 ####################
 # make a verbose "test" target named "check"
