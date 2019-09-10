@@ -4,7 +4,7 @@
 #include "mpi.h"
 #include "kvtree.h"
 
-/** \defgoup redset Redset
+/** \defgroup redset Redset
  *  \brief Redundancy encoding file sets
  *
  * Redset will create the redundancy data needed for a set of
