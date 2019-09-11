@@ -5,7 +5,7 @@
 This module lets one create one or more redundancy descriptors,
 which then may be applied to a set of files distributed across a group of processes.
 
-Usage is documented in [src/redset.h](src/redset.h) and [doc/rst/redset.rst](doc/rst/redset.rst).
+Usage is documented in [src/redset.h](src/redset.h), [doc/rst/redset.rst](doc/rst/redset.rst), and the [User API docs](https://ecp-veloc.github.io/component-user-docs/group__redset.html).
 Also see the example program in the [test](test) directory.
 
 Implementation details can be found in [doc/rst/implementation.rst](doc/rst/implementation.rst) and [doc/rst/schemes.rst](doc/rst/schemes.rst).
