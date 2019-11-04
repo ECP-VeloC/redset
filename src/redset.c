@@ -131,6 +131,11 @@ static int redset_initialize(redset_base* d)
  * allocate and fill in structure for partner specific fields in state */
 static int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
 {
+  if(parent_comm == MPI_COMM_NULL){
+    redset_err("parent_comm parameter is MPI_COMM_NULL @ %s:%d",
+           __FILE__, __LINE__);
+    return REDSET_FAILURE; 
+  }
   int rc = REDSET_SUCCESS;
 
   /* allocate a new structure to hold partner state */
@@ -178,6 +183,11 @@ static int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
  * allocate and fill in structure for xor specific fields in state */
 static int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
 {
+  if(parent_comm == MPI_COMM_NULL){
+    redset_err("parent_comm parameter is MPI_COMM_NULL @ %s:%d",
+           __FILE__, __LINE__);
+    return REDSET_FAILURE; 
+  }
   int rc = REDSET_SUCCESS;
 
   /* allocate a new structure to hold XOR state */
@@ -484,6 +494,16 @@ int redset_create(
   const char* group_name,
   redset* dvp)
 {
+  if(group_name == NULL){
+    redset_err("group_name parameter is NULL @ %s:%d",
+           __FILE__, __LINE__);
+    return REDSET_FAILURE; 
+  }
+  if(comm == MPI_COMM_NULL){
+    redset_err("comm parameter is MPI_COMM_NULL @ %s:%d",
+           __FILE__, __LINE__);
+    return REDSET_FAILURE; 
+  }
   /* allocate a new redset structure */
   redset_base* d = (redset_base*) REDSET_MALLOC(sizeof(redset_base));
 
@@ -926,6 +946,8 @@ int redset_apply(
   const char* name,
   const redset dvp)
 {
+
+
   int i;
 
   /* get pointer to redset structure */

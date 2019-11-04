@@ -14,6 +14,10 @@
 
 #include "redset.h"
 
+
+#define TEST_PASS (0)
+#define TEST_FAIL (1)
+
 /* compute MPI_LAND of value across all procs,
  * return 1 if value is 1 on all procs, 0 otherwise */
 int alltrue(int value, MPI_Comm comm)
@@ -40,6 +44,7 @@ void create_files(int count, const char** filelist)
       write(fd, buf, strlen(buf));
       close(fd);
     } else {
+      printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
       printf("Error opening file %s: %d %s\n", name, errno, strerror(errno));
     }
   }
@@ -65,6 +70,7 @@ int check_for_redundancy_files(int mode, const char* path, redset d)
   /* get list of redundancy files */
   redset_filelist list = redset_filelist_get(path, d);
   if (list == NULL) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Failed to get list of redundancy files\n");
     return 1;
   }
@@ -75,6 +81,7 @@ int check_for_redundancy_files(int mode, const char* path, redset d)
   for (i = 0; i < count; i++) {
     const char* name = redset_filelist_file(list, i);
     if (access(name, F_OK) != 0) {
+      printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
       printf("ERROR: Missing redundancy file %s\n", name);
       rc = 1;
     }
@@ -83,6 +90,7 @@ int check_for_redundancy_files(int mode, const char* path, redset d)
   /* check that we got the expected number of files in the list */
   if (count != 2) {
     /* all methods generate two files */
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Unexpected number of redundancy files\n");
     rc = 1;
   }
@@ -90,6 +98,7 @@ int check_for_redundancy_files(int mode, const char* path, redset d)
   /* free the list */
   redset_filelist_release(&list);
   if (list != NULL) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Failed to free list of redundancy files\n");
     rc = 1;
   }
@@ -104,6 +113,7 @@ int test_apply(int mode, int filecount, const char** filelist, const char* path,
 
   int redset_rc = redset_apply(filecount, filelist, path, d);
   if (! alltrue(redset_rc == REDSET_SUCCESS, comm)) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: apply failed\n");
     rc = 1;
   }
@@ -120,6 +130,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
 
   int redset_rc = redset_unapply(path, d);
   if (! alltrue(redset_rc == REDSET_SUCCESS, comm)) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: unapply failed\n");
     rc = 1;
   }
@@ -127,6 +138,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
   /* get list of redundancy files */
   redset_filelist list = redset_filelist_get(path, d);
   if (list == NULL) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Failed to get list of redundancy files\n");
     return 1;
   }
@@ -137,6 +149,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
   for (i = 0; i < count; i++) {
     const char* name = redset_filelist_file(list, i);
     if (access(name, F_OK) == 0) {
+      printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
       printf("ERROR: Found redundancy file %s\n", name);
       rc = 1;
     }
@@ -145,6 +158,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
   /* check that we got the expected number of files in the list */
   if (count != 2) {
     /* all methods generate two files */
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Unexpected number of redundancy files\n");
     rc = 1;
   }
@@ -152,6 +166,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
   /* free the list */
   redset_filelist_release(&list);
   if (list != NULL) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: Failed to free list of redundancy files\n");
     rc = 1;
   }
@@ -168,6 +183,7 @@ int test_recover_no_loss(int mode, const char* path, int filecount, const char**
   redset d;
   int redset_rc = redset_recover(comm, path, &d);
   if (! alltrue(redset_rc == REDSET_SUCCESS, comm)) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: recover failed\n");
     rc = 1;
   }
@@ -175,6 +191,7 @@ int test_recover_no_loss(int mode, const char* path, int filecount, const char**
   rc = check_for_redundancy_files(mode, path, d);
 
   if (redset_delete(&d) != REDSET_SUCCESS) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: failed to delete redundancy descriptor\n");
     rc = 1;
   }
@@ -203,11 +220,13 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
 
   if (mode == REDSET_COPY_SINGLE) {
     if (recovered) {
+      printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
       printf("ERROR: should not have be able to recover files\n");
       rc = 1;
     }
   } else {
     if (! recovered) {
+      printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
       printf("ERROR: recover failed\n");
       rc = 1;
     }
@@ -216,6 +235,7 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
   }
 
   if (redset_delete(&d) != REDSET_SUCCESS) {
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
     printf("ERROR: failed to delete redundancy descriptor\n");
     rc = 1;
   }
@@ -223,12 +243,14 @@ int test_recover_loss_one_rank(int mode, const char* path, int count, const char
   return rc;
 }
 
-void test_sequence(int copymode, const char* group, int filecount, const char** filelist, const char* prefix)
+int test_sequence(int copymode, const char* group, int filecount, const char** filelist, const char* prefix)
 {
+  int rc;
   create_files(filecount, filelist);
 
   redset d;
   redset_create(copymode, MPI_COMM_WORLD, group, &d);
+
 
   test_apply(copymode, filecount, filelist, prefix, d, MPI_COMM_WORLD);
 
@@ -238,18 +260,33 @@ void test_sequence(int copymode, const char* group, int filecount, const char** 
 
   test_unapply(copymode, prefix, d, MPI_COMM_WORLD);
 
+  //null test
+  rc = redset_create(copymode, MPI_COMM_WORLD, NULL, &d);
+  if(rc == REDSET_SUCCESS){
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
+    printf("redset_create succeded with group name null parameters\n");
+    return TEST_FAIL;
+  }
+  //MPI_COMM_NULL test
+  rc = redset_create(copymode, MPI_COMM_NULL, group, &d);
+  if(rc == REDSET_SUCCESS){
+    printf ("Error in line %d, file %s, function %s.\n", __LINE__, __FILE__, __func__);
+    printf("redset_create succeded with MPI_COMM_NULL comm parameters\n");
+    return TEST_FAIL;
+  }
+
   redset_delete(&d);
 
   delete_files(filecount, filelist);
 
-  return;
+  return TEST_PASS;
 }
 
 int main (int argc, char* argv[])
 {
   MPI_Init(&argc, &argv);
 
-  int rank, ranks;
+  int rank, ranks, rc;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &ranks);
 
@@ -270,9 +307,12 @@ int main (int argc, char* argv[])
   char hostname[1024];
   gethostname(hostname, sizeof(hostname));
 
-  test_sequence(REDSET_COPY_SINGLE,  hostname, filecount, filelist, prefix);
-  test_sequence(REDSET_COPY_PARTNER, hostname, filecount, filelist, prefix);
-  test_sequence(REDSET_COPY_XOR,     hostname, filecount, filelist, prefix);
+  rc = test_sequence(REDSET_COPY_SINGLE,  hostname, filecount, filelist, prefix);
+  if(rc != TEST_PASS) return TEST_FAIL;
+  rc = test_sequence(REDSET_COPY_PARTNER, hostname, filecount, filelist, prefix);
+  if(rc != TEST_PASS) return TEST_FAIL;
+  rc = test_sequence(REDSET_COPY_XOR,     hostname, filecount, filelist, prefix);
+  if(rc != TEST_PASS) return TEST_FAIL;
 
   redset_finalize();
 
@@ -280,5 +320,5 @@ int main (int argc, char* argv[])
 
   MPI_Finalize();
 
-  return 0;
+  return TEST_PASS;
 }
