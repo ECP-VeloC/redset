@@ -1,9 +1,5 @@
-langauge: c
+language: c
 dist: trusty
-
-compiler:
-  - gcc
-  - clang
 
 matrix:
   include:
