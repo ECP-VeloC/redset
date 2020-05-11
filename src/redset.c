@@ -969,11 +969,11 @@ int redset_apply(
 
   /* determine whether all processes saved their redundancy info */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its redundancy information */
+    /* at least one process failed to encode its redundancy information */
     return REDSET_FAILURE;
   }
 
-  /* apply the redundancy scheme */
+  /* apply the redundancy scheme to data files */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     rc = redset_apply_single(numfiles, files, name, d);
@@ -1072,14 +1072,14 @@ int redset_unapply(
   const char* name,
   const redset dvp)
 {
-  int rc;
+  int rc = REDSET_SUCCESS;
 
   /* get pointer to redset structure */
   redset_base* d = (redset_base*) dvp;
 
   MPI_Comm comm_world = d->parent_comm;
 
-  /* now recover data using redundancy scheme, if necessary */
+  /* now remove redset encoding data depending on type, if necessary */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     rc = redset_unapply_single(name, d);
@@ -1094,16 +1094,16 @@ int redset_unapply(
 
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its data */
+    /* at least one process failed to clean up */
     return REDSET_FAILURE;
   }
 
-  /* reapply encoding to redundancy descriptor */
+  /* remove files encoding the redundancy scheme */
   rc = redset_unencode_reddesc(name, d);
 
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its redundancy information */
+    /* at least one process failed to clean up */
     return REDSET_FAILURE;
   }
 
