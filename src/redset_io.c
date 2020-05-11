@@ -585,10 +585,14 @@ int redset_file_is_writeable(const char* file)
 int redset_file_unlink(const char* file)
 {
   if (unlink(file) != 0) {
-    redset_dbg(2, "Failed to delete file: %s errno=%d %s @ %s:%d",
-      file, errno, strerror(errno), __FILE__, __LINE__
-    );
-    return REDSET_FAILURE;
+    /* hit an error deleting, but don't care if we failed
+     * because there is no file at that path */
+    if (errno != ENOENT) {
+      redset_dbg(2, "Failed to delete file: %s errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      return REDSET_FAILURE;
+    }
   }
   return REDSET_SUCCESS;
 }
