@@ -56,6 +56,12 @@ int redset_restore_from_kvtree(
   redset_base* d
 );
 
+/* capture file metadata for file into meta */
+int redset_meta_encode(const char* file, kvtree* meta);
+
+/* apply file metadata in meta to file */
+int redset_meta_apply(const char* file, const kvtree* meta);
+
 int redset_encode_reddesc_single(
   kvtree* hash,
   const char* name,

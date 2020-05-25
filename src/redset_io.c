@@ -517,6 +517,19 @@ int redset_write_pad_n(int n, const char** files, int* fds,
   return REDSET_SUCCESS;
 }
 
+
+/* given a filename, return stat info */
+int redset_stat(const char* file, struct stat* statbuf)
+{
+  int rc = stat(file, statbuf);
+  if (rc < 0) {
+    redset_err("Failed to stat file %s: errno=%d %s @ %s:%d",
+      file, errno, strerror(errno), __FILE__, __LINE__
+    );
+  }
+  return rc;
+}
+
 /* given a filename, return number of bytes in file */
 unsigned long redset_file_size(const char* file)
 {

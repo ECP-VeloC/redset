@@ -145,7 +145,9 @@ int redset_apply_xor(
 
     /* add entry for this file, including its index, name, and size */
     kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
-    kvtree_util_set_bytecount(file_hash, "SIZE", file_size);
+
+    /* record file meta data of this file */
+    redset_meta_encode(file_name, file_hash);
 
     /* record entry in our names and sizes arrays */
     filenames[i] = file_name;
@@ -618,6 +620,27 @@ int redset_recover_xor_rebuild(
     }
   }
 #endif
+
+  /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
+  if (root == d->rank) {
+    /* get pointer to our current hash */
+    kvtree* current_hash = kvtree_get(header, "CURRENT");
+
+    /* we've written data for all files */
+    kvtree* files_hash = kvtree_get(current_hash, "FILE");
+    for (i = 0; i < num_files; i++) {
+      /* get file name of this file */
+      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
+      kvtree_elem* elem = kvtree_elem_first(index_hash);
+      const char* file_name = kvtree_elem_key(elem);
+  
+      /* lookup hash for this file */
+      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
+
+      /* set metadata properties on rebuilt file */
+      redset_meta_apply(file_name, file_hash);
+    }
+  }
 
   /* free the buffers */
   redset_align_free(&recv_buf);

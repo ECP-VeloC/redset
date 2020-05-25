@@ -1,9 +1,25 @@
+/* to get nsec fields in stat structure */
+#define _GNU_SOURCE
+
+/* TODO: ugly hack until we get a configure test */
+// HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
+// HAVE_STRUCT_STAT_ST_MTIME_N
+// HAVE_STRUCT_STAT_ST_UMTIME
+// HAVE_STRUCT_STAT_ST_MTIME_USEC
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #include <limits.h>
 #include <unistd.h>
+
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "mpi.h"
 
@@ -768,6 +784,190 @@ int redset_bool_have_files(
 
   /* if we make it here, we have all of our files */
   return 1;
+}
+
+static void redset_stat_get_atimes(const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_atime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_atime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uatime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_atime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_mtimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_mtime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_mtime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_umtime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_mtime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_ctimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_ctime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_ctime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uctime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_ctime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+int redset_meta_encode(const char* file, kvtree* meta)
+{
+  struct stat statbuf;
+  int rc = redset_stat(file, &statbuf);
+  if (rc == 0) {
+    kvtree_util_set_unsigned_long(meta, "MODE", (unsigned long) statbuf.st_mode);
+    kvtree_util_set_unsigned_long(meta, "UID",  (unsigned long) statbuf.st_uid);
+    kvtree_util_set_unsigned_long(meta, "GID",  (unsigned long) statbuf.st_gid);
+    kvtree_util_set_unsigned_long(meta, "SIZE", (unsigned long) statbuf.st_size);
+
+    uint64_t secs, nsecs;
+    redset_stat_get_atimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_ctimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_mtimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_NSECS", (unsigned long) nsecs);
+
+    return REDSET_SUCCESS;
+  }
+  return REDSET_FAILURE;
+}
+
+int redset_meta_apply(const char* file, const kvtree* meta)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* set permission bits on file */
+  unsigned long mode_val;
+  if (kvtree_util_get_unsigned_long(meta, "MODE", &mode_val) == KVTREE_SUCCESS) {
+    mode_t mode = (mode_t) mode_val;
+
+    /* TODO: mask some bits here */
+
+    int chmod_rc = chmod(file, mode);
+    if (chmod_rc != 0) {
+      /* failed to set permissions */
+      redset_err("chmod(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set uid and gid on file */
+  unsigned long uid_val = -1;
+  unsigned long gid_val = -1;
+  kvtree_util_get_unsigned_long(meta, "UID", &uid_val);
+  kvtree_util_get_unsigned_long(meta, "GID", &gid_val);
+  if (uid_val != -1 || gid_val != -1) {
+    /* got a uid or gid value, try to set them */
+    int chown_rc = chown(file, (uid_t) uid_val, (gid_t) gid_val);
+    if (chown_rc != 0) {
+      /* failed to set uid and gid */
+      redset_err("chown(%s, %lu, %lu) failed: errno=%d %s @ %s:%d",
+        file, uid_val, gid_val, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* can't set the size at this point, but we can check it */
+  unsigned long size;
+  if (kvtree_util_get_unsigned_long(meta, "SIZE", &size) == KVTREE_SUCCESS) {
+    /* got a size field in the metadata, stat the file */
+    struct stat statbuf;
+    int stat_rc = redset_stat(file, &statbuf);
+    if (stat_rc == 0) {
+      /* stat succeeded, check that sizes match */
+      if (size != statbuf.st_size) {
+        /* file size is not correct */
+        redset_err("file `%s' size is %lu expected %lu @ %s:%d",
+          file, (unsigned long) statbuf.st_size, size, __FILE__, __LINE__
+        );
+        rc = REDSET_FAILURE;
+      }
+    } else {
+      /* failed to stat file */
+      redset_err("stat(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set timestamps on file as last step */
+  unsigned long atime_secs  = 0;
+  unsigned long atime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "ATIME_SECS",  &atime_secs);
+  kvtree_util_get_unsigned_long(meta, "ATIME_NSECS", &atime_nsecs);
+
+  unsigned long mtime_secs  = 0;
+  unsigned long mtime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "MTIME_SECS",  &mtime_secs);
+  kvtree_util_get_unsigned_long(meta, "MTIME_NSECS", &mtime_nsecs);
+
+  if (atime_secs != 0 || atime_nsecs != 0 ||
+      mtime_secs != 0 || mtime_nsecs != 0)
+  {
+    /* fill in time structures */
+    struct timespec times[2];
+    times[0].tv_sec  = (time_t) atime_secs;
+    times[0].tv_nsec = (long)   atime_nsecs;
+    times[1].tv_sec  = (time_t) mtime_secs;
+    times[1].tv_nsec = (long)   mtime_nsecs;
+
+    /* set times with nanosecond precision using utimensat,
+     * assume path is relative to current working directory,
+     * if it's not absolute, and set times on link (not target file)
+     * if dest_path refers to a link */
+    int utime_rc = utimensat(AT_FDCWD, file, times, AT_SYMLINK_NOFOLLOW);
+    if (utime_rc != 0) {
+      redset_err("Failed to change timestamps on `%s' utimensat() errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  return rc;
 }
 
 static int redset_build_filename(
