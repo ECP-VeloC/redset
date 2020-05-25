@@ -86,10 +86,8 @@ int redset_apply_single(
     /* add entry for this file, including its index and name */
     kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
 
-    /* record file size */
-    kvtree_util_set_bytecount(file_hash, "SIZE", file_size);
-
-    /* TODO: record file permissions, timestamps */
+    /* record file permissions, timestamps, size */
+    redset_meta_encode(file_name, file_hash);
 
     /* TODO: compute and store CRC values */
   }

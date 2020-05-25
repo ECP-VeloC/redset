@@ -4,6 +4,8 @@
 #include <config.h>
 #include <stdarg.h>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* compute crc32 */
 #include <zlib.h>
@@ -83,6 +85,9 @@ int redset_write_pad_n(
   unsigned long offset,
   unsigned long* filesizes
 );
+
+/** given a filename, return stat info */
+int redset_stat(const char* file, struct stat* statbuf);
 
 /** given a filename, return number of bytes in file */
 unsigned long redset_file_size(const char* file);
