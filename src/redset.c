@@ -639,19 +639,11 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
   return REDSET_SUCCESS;
 }
 
-/* build a redundancy descriptor corresponding to the specified kvtree,
- * this function is collective, it is the opposite of store_to_kvtree */
-int redset_restore_from_kvtree(
+/* read values from hash and fill in corresponding descriptor fields */
+static int redset_read_from_kvtree(
   const kvtree* hash,
   redset_base* d)
 {
-  /* it's required that the caller has already initialized the descriptor
-   * and dupped the parent comm before calling this function, if we expose
-   * this function to the user we should revisit this interface */
-  // redset_initialize(d);
-  // MPI_Comm_dup(comm, &d->parent_comm);
-  MPI_Comm comm = d->parent_comm;
-
   /* enable / disable the descriptor */
   d->enabled = 1;
   kvtree_util_get_int(hash, REDSET_KEY_CONFIG_ENABLED, &(d->enabled));
@@ -695,6 +687,28 @@ int redset_restore_from_kvtree(
       __FILE__, __LINE__
     );
   }
+
+  return REDSET_SUCCESS;
+}
+
+/* build a redundancy descriptor corresponding to the specified kvtree,
+ * this function is collective, it is the opposite of store_to_kvtree */
+int redset_restore_from_kvtree(
+  const kvtree* hash,
+  redset_base* d)
+{
+  /* it's required that the caller has already initialized the descriptor
+   * and dupped the parent comm before calling this function, if we expose
+   * this function to the user we should revisit this interface */
+  // redset_initialize(d);
+
+  /* fill in fields from hash (no MPI allowed) */
+  redset_read_from_kvtree(hash, d);
+
+  // MPI_Comm_dup(comm, &d->parent_comm);
+  MPI_Comm comm = d->parent_comm;
+
+  /* build the group communicator */
   MPI_Comm_split(comm, d->group_id, d->rank, &d->comm);
 
   /* fill in state struct depending on copy type */
@@ -1091,6 +1105,15 @@ static int redset_recover_reddesc(
   /* check that everyone can get their descriptor */
   int num_desc = kvtree_size(recv_hash);
   if (! redset_alltrue((num_desc > 0), comm_world)) {
+    /* we can't fully recover the reddesc,
+     * but if this process has its reddesc,
+     * extract the fields so that unapply cleans up */
+    if (num_desc > 0) {
+      kvtree_elem* desc_elem = kvtree_elem_first(recv_hash);
+      kvtree* desc_hash = kvtree_elem_hash(desc_elem);
+      redset_read_from_kvtree(desc_hash, d);
+    }
+
     kvtree_delete(&recv_hash);
     kvtree_delete(&send_hash);
     redset_dbg(2, "Cannot find process that has my redundancy descriptor @ %s:%d",
