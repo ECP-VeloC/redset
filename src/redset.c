@@ -2,8 +2,11 @@
 #define _GNU_SOURCE
 
 /* TODO: ugly hack until we get a configure test */
-// HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+#if defined(__APPLE__)
+#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
+#else
 #define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
+#endif
 // HAVE_STRUCT_STAT_ST_MTIME_N
 // HAVE_STRUCT_STAT_ST_UMTIME
 // HAVE_STRUCT_STAT_ST_MTIME_USEC
