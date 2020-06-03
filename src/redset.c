@@ -241,7 +241,7 @@ static int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
   }
 
   /* record group mapping info in descriptor */
-  state->group_map = header; 
+  state->group_map = header;
 
   /* record group rank, world rank, and hostname of left and right partners */
   redset_set_partners(
@@ -463,7 +463,7 @@ static int redset_split_across(
   /* Split procs in parent into groups containing all procs with same
    * rank within group, order by rank in parent */
   MPI_Comm_split(comm_parent, rank_group, rank_parent, comm_across);
-  
+
   return REDSET_SUCCESS;
 }
 
@@ -1335,7 +1335,7 @@ int redset_unapply(
 
 static int redset_from_dir(
   MPI_Comm comm_world,
-  const char* name, 
+  const char* name,
   redset_base* d)
 {
   /* get name of this process */
