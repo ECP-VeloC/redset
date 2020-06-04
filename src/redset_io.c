@@ -665,6 +665,15 @@ Directory functions
 /* recursively create directory and subdirectories */
 int redset_mkdir(const char* dir, mode_t mode)
 {
+  /* consider it a success if we either create the directory
+   * or we fail because it already exists */
+  int tmp_rc = mkdir(dir, mode);
+  if (tmp_rc == 0 || errno == EEXIST) {
+    return REDSET_SUCCESS;
+  }
+
+  /* failed to create the directory,
+   * we'll check the parent dir and try again */
   int rc = REDSET_SUCCESS;
 
   /* With dirname, either the original string may be modified or the function may return a
@@ -686,7 +695,7 @@ int redset_mkdir(const char* dir, mode_t mode)
 
   /* if we can write to path, try to create subdir within path */
   if (access(path, W_OK) == 0 && rc == REDSET_SUCCESS) {
-    int tmp_rc = mkdir(dir, mode);
+    tmp_rc = mkdir(dir, mode);
     if (tmp_rc < 0) {
       if (errno == EEXIST) {
         /* don't complain about mkdir for a directory that already exists */
