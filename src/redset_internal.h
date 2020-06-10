@@ -10,6 +10,24 @@
 
 #define REDSET_VERSION "1.0"
 
+/* names of parameters used when serializing a redset to disk */
+#define REDSET_KEY_CONFIG_ENABLED   "ENABLED"
+#define REDSET_KEY_CONFIG_INTERVAL  "INTERVAL"
+#define REDSET_KEY_CONFIG_OUTPUT    "OUTPUT"
+#define REDSET_KEY_CONFIG_STORE     "STORE"
+#define REDSET_KEY_CONFIG_DIRECTORY "DIR"
+#define REDSET_KEY_CONFIG_TYPE      "TYPE"
+#define REDSET_KEY_CONFIG_GROUP      "GROUP"
+#define REDSET_KEY_CONFIG_GROUPS     "GROUPS"
+#define REDSET_KEY_CONFIG_GROUP_ID   "GROUP"
+#define REDSET_KEY_CONFIG_GROUP_SIZE "RANKS"
+#define REDSET_KEY_CONFIG_GROUP_RANK "RANK"
+
+#define REDSET_KEY_COPY_XOR_RANKS "RANKS"
+#define REDSET_KEY_COPY_XOR_GROUP "GROUP"
+#define REDSET_KEY_COPY_XOR_GROUP_RANK  "RANK"
+#define REDSET_KEY_COPY_XOR_GROUP_RANKS "RANKS"
+
 typedef struct {
   int      enabled;        /* flag indicating whether this descriptor is active */
   int      type;           /* redundancy scheme to apply */
@@ -64,6 +82,9 @@ typedef struct {
   int count;
   const char** files;
 } redset_list;
+
+/** default set size for redset to use */
+extern int redset_set_size;
 
 int redset_set_partners(
   MPI_Comm parent_comm, MPI_Comm comm, int dist,

@@ -12,6 +12,8 @@
 
 #define REDSET_MAX_FILENAME (1024)
 
+extern int redset_debug;
+
 extern int redset_rank;
 extern char* redset_hostname;
 

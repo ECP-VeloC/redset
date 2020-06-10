@@ -2,7 +2,6 @@
 #define REDSET_H
 
 #include "mpi.h"
-#include "kvtree.h"
 
 /** \defgroup redset Redset
  *  \brief Redundancy encoding file sets
@@ -28,6 +27,11 @@ extern "C" {
 #define REDSET_COPY_XOR     (3)
 #define REDSET_COPY_RS      (4)
 
+/* names of user settable config parameters */
+#define REDSET_KEY_CONFIG_SET_SIZE  "SETSIZE"
+#define REDSET_KEY_CONFIG_MPI_BUF_SIZE "MPI_BUF_SIZE"
+#define REDSET_KEY_CONFIG_DEBUG "DEBUG"
+
 /********************************************************/
 /** \name Define redundancy descriptor structure */
 ///@{
@@ -44,6 +48,34 @@ int redset_init(void);
 
 /** shutdown library */
 int redset_finalize(void);
+
+/* needs to be above doxygen comment to get association right */
+typedef struct kvtree_struct kvtree;
+
+/**
+ * Get/set redset configuration values.
+ *
+ * The following configuration options can be set (type in parenthesis):
+ *   * "DEBUG" (int) - if non-zero, output debug information from inside
+ *     redset.
+ *   * "SETSIZE" (int) - set size for redset to use.
+ *   * "MPI_BUF_SIZE" (byte count [IN], int [OUT]) - MPI buffer size to chunk
+ *     file transfer. Must not exceed INT_MAX.
+ *   .
+ * Symbolic names REDSET_KEY_CONFIG_FOO are defined in redset.h and should
+ * be used instead of the strings whenever possible to guard against typos in
+ * strings.
+ *
+ * \result If config != NULL, then return config on success.  If config == NULL
+ *         (you're querying the config) then return a new kvtree on success,
+ *         which must be kvtree_delete()ed by the caller. NULL on any failures.
+ * \param config The new configuration. If config == NULL, then return a new
+ *               kvtree with all the configuration values.
+ *
+ */
+kvtree* redset_config(
+  const kvtree *config /** < [IN] - options to be set */
+);
 
 /** create a new redundancy set descriptor */
 int redset_create(
