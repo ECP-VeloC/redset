@@ -689,7 +689,7 @@ void test_sequence(int copymode, const char* group, int filecount, const char** 
     redset_create_single(MPI_COMM_WORLD, group, &d);
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(MPI_COMM_WORLD, group, 8, 2, &d);
+    redset_create_partner(MPI_COMM_WORLD, group, 8, 1, &d);
     break;
   case REDSET_COPY_XOR:
     redset_create_xor(MPI_COMM_WORLD, group, 8, &d);
