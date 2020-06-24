@@ -40,10 +40,10 @@ typedef void* redset_filelist;
 ///@{
 
 /** initialize library */
-int redset_init();
+int redset_init(void);
 
 /** shutdown library */
-int redset_finalize();
+int redset_finalize(void);
 
 /** create a new redundancy set descriptor */
 int redset_create(
