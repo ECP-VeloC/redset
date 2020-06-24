@@ -25,7 +25,7 @@
 
 #define REDSET_HOSTNAME (255)
 
-int redset_init()
+int redset_init(void)
 {
   /* read our hostname */
   char hostname[REDSET_HOSTNAME + 1];
@@ -44,7 +44,7 @@ int redset_init()
   return REDSET_SUCCESS;
 }
 
-int redset_finalize()
+int redset_finalize(void)
 {
   redset_free(&redset_hostname);
   return REDSET_SUCCESS;
