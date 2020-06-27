@@ -1,7 +1,20 @@
-job:
+slurmjob:
   tags:
     - quartz
-    - shell
+    - batch
+  variables:
+    LLNL_SLURM_SCHEDULER_PARAMETERS: "-N 3 -p pbatch"
+  script:
+    - module load cmake/3.9.2
+    - cmake -DWITH_KVTREE_PREFIX=$HOME/kvtree/KVTree.git/install -DWITH_RANKSTR_PREFIX=$HOME/rankstr/rankstr.git/install -DMPI=ON 
+    - make VERBOSE=1
+    - make check
+lsf-job:
+  tags:
+    - lassen
+    - batch
+  variables:
+    LLNL_LSF_SCHEDULER_PARAMETERS: "-nnodes 3 -q pbatch"
   script:
     - module load cmake/3.9.2
     - cmake -DWITH_KVTREE_PREFIX=$HOME/kvtree/KVTree.git/install -DWITH_RANKSTR_PREFIX=$HOME/rankstr/rankstr.git/install -DMPI=ON 
