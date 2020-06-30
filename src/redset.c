@@ -576,8 +576,8 @@ int redset_create(
   MPI_Bcast(&d->group_id, 1, MPI_INT, 0, d->comm);
 
   /* count the number of groups */
-  int group_master = (d->rank == 0) ? 1 : 0;
-  MPI_Allreduce(&group_master, &d->groups, 1, MPI_INT, MPI_SUM, comm);
+  int group_leader = (d->rank == 0) ? 1 : 0;
+  MPI_Allreduce(&group_leader, &d->groups, 1, MPI_INT, MPI_SUM, comm);
 
   /* fill in state struct depending on copy type */
   switch (d->type) {
