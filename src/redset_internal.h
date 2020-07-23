@@ -36,9 +36,33 @@ typedef struct {
 } redset_xor;
 
 typedef struct {
+  kvtree*   group_map;       /* kvtree that maps group rank to world rank */
+  int       lhs_rank;        /* rank which is one less (with wrap to highest) within set */
+  int       lhs_rank_world;  /* rank of lhs process in comm world */
+  char*     lhs_hostname;    /* hostname of lhs process */
+  int       rhs_rank;        /* rank which is one more (with wrap to lowest) within set */
+  int       rhs_rank_world;  /* rank of rhs process in comm world */
+  char*     rhs_hostname;    /* hostname of rhs process */
+  int       encoding;        /* number of encoding blocks */
+  int       gf_bits;         /* number of bits in Galois Field */
+  int       gf_size;         /* number of elements in Galois Field */
+  unsigned int*  gf_log;     /* log_2 table */
+  unsigned int*  gf_exp;     /* exp_2 table (inverse log) */
+  unsigned int*  gf_imult;   /* computes multiplicative inverse for each value */
+  unsigned int*  mat;        /* encoding matrix (ranks + encoding) x ranks */
+  unsigned char* gf_premult; /* pre-computed products for all elements against a constant */
+} redset_reedsolomon;
+
+typedef struct {
   int count;
   const char** files;
 } redset_list;
+
+int redset_set_partners(
+  MPI_Comm parent_comm, MPI_Comm comm, int dist,
+  int* lhs_rank, int* lhs_rank_world, char** lhs_hostname,
+  int* rhs_rank, int* rhs_rank_world, char** rhs_hostname
+);
 
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
@@ -62,6 +86,20 @@ int redset_meta_encode(const char* file, kvtree* meta);
 /* apply file metadata in meta to file */
 int redset_meta_apply(const char* file, const kvtree* meta);
 
+int redset_create_rs(MPI_Comm parent_comm, redset_base* d, int encoding);
+
+int redset_delete_rs(redset_base* d);
+
+int redset_store_to_kvtree_rs(
+  const redset_base* d,
+  kvtree* hash
+);
+
+int redset_read_from_kvtree_rs(
+  const kvtree* hash,
+  int* outencoding
+);
+
 int redset_encode_reddesc_single(
   kvtree* hash,
   const char* name,
@@ -80,6 +118,11 @@ int redset_encode_reddesc_xor(
   const redset_base* d
 );
 
+int redset_encode_reddesc_rs(
+  kvtree* hash,
+  const char* name,
+  const redset_base* d
+);
 
 int redset_apply_single(
   int numfiles,
@@ -102,6 +145,13 @@ int redset_apply_xor(
   const redset_base* d
 );
 
+int redset_apply_rs(
+  int numfiles,
+  const char** files,
+  const char* name,
+  const redset_base* d
+);
+
 
 int redset_recover_single(
   const char* name,
@@ -114,6 +164,11 @@ int redset_recover_partner(
 );
 
 int redset_recover_xor(
+  const char* name,
+  const redset_base* d
+);
+
+int redset_recover_rs(
   const char* name,
   const redset_base* d
 );
@@ -134,6 +189,11 @@ int redset_unapply_xor(
   const redset_base* d
 );
 
+int redset_unapply_rs(
+  const char* name,
+  const redset_base* d
+);
+
 
 redset_list* redset_filelist_get_single(
   const char* name,
@@ -146,6 +206,11 @@ redset_list* redset_filelist_get_partner(
 );
 
 redset_list* redset_filelist_get_xor(
+  const char* name,
+  redset_base* d
+);
+
+redset_list* redset_filelist_get_rs(
   const char* name,
   redset_base* d
 );
