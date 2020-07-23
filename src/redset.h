@@ -26,6 +26,7 @@ extern "C" {
 #define REDSET_COPY_SINGLE  (1)
 #define REDSET_COPY_PARTNER (2)
 #define REDSET_COPY_XOR     (3)
+#define REDSET_COPY_RS      (4)
 
 /********************************************************/
 /** \name Define redundancy descriptor structure */

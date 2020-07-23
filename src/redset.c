@@ -324,6 +324,9 @@ int redset_delete(redset* dvp)
   case REDSET_COPY_XOR:
     redset_delete_xor(d);
     break;
+  case REDSET_COPY_RS:
+    redset_delete_rs(d);
+    break;
   }
 
   /* free the communicator we created */
@@ -379,6 +382,9 @@ int redset_to_kvtree(const redset_base* d, kvtree* hash)
     break;
   case REDSET_COPY_XOR:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "XOR");
+    break;
+  case REDSET_COPY_RS:
+    kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "RS");
     break;
   }
 
@@ -475,13 +481,15 @@ static int redset_type_int_from_str(const char* value, int* outtype)
 {
   int rc = REDSET_SUCCESS;
 
-  int type;
+  int type = REDSET_COPY_NULL;
   if (strcasecmp(value, "SINGLE") == 0) {
     type = REDSET_COPY_SINGLE;
   } else if (strcasecmp(value, "PARTNER") == 0) {
     type = REDSET_COPY_PARTNER;
   } else if (strcasecmp(value, "XOR") == 0) {
     type = REDSET_COPY_XOR;
+  } else if (strcasecmp(value, "RS") == 0) {
+    type = REDSET_COPY_RS;
   } else {
     if (redset_rank == 0) {
       redset_warn("Unknown copy type %s @ %s:%d",
@@ -514,7 +522,7 @@ int redset_create(
   /* initialize the descriptor */
   redset_initialize(d);
 
-  /* set xor set size */
+  /* set redundancy set size */
   int set_size = SET_SIZE;
 
   /* assume it's enabled, we may turn this bit off later */
@@ -526,11 +534,12 @@ int redset_create(
   /* dup the parent communicator */
   MPI_Comm_dup(comm, &d->parent_comm);
 
-  /* split procs from comm into sub communicators based on group_name */
-  MPI_Comm newcomm;
-  rankstr_mpi_comm_split(d->parent_comm, group_name, 0, 0, 1, &newcomm);
+  /* split procs from comm into sub communicators based on group_name,
+   * this puts all procs with the same group_name into the same subcomm */
+  MPI_Comm comm_fail;
+  rankstr_mpi_comm_split(d->parent_comm, group_name, 0, 0, 1, &comm_fail);
 
-  /* build the communicator based on the copy type
+  /* build our redundancy communicator based on the copy type
    * and other parameters */
   MPI_Comm comm_across;
   int rank_across, ranks_across, split_id;
@@ -541,13 +550,15 @@ int redset_create(
     break;
   case REDSET_COPY_PARTNER:
     /* dup the communicator across failure groups */
-    redset_split_across(comm, newcomm, &d->comm);
+    redset_split_across(comm, comm_fail, &d->comm);
     break;
   case REDSET_COPY_XOR:
-    /* split the communicator across nodes based on xor set size
-     * to create our xor communicator */
+  case REDSET_COPY_RS:
+    /* split the communicator across groups based on set size
+     * to create our redundancy group communicator */
+
     /* split comm world across failure groups */
-    redset_split_across(comm, newcomm, &comm_across);
+    redset_split_across(comm, comm_fail, &comm_across);
 
     /* get our rank and the number of ranks in this communicator */
     MPI_Comm_rank(comm_across, &rank_across);
@@ -579,6 +590,10 @@ int redset_create(
   int group_leader = (d->rank == 0) ? 1 : 0;
   MPI_Allreduce(&group_leader, &d->groups, 1, MPI_INT, MPI_SUM, comm);
 
+  /* TODO: this should be coming in as a user param */
+  /* number of encoding blocks to use in Reed-Solomon */
+  int encoding = 2;
+
   /* fill in state struct depending on copy type */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
@@ -589,10 +604,13 @@ int redset_create(
   case REDSET_COPY_XOR:
     redset_create_xor(comm, d);
     break;
+  case REDSET_COPY_RS:
+    redset_create_rs(comm, d, encoding);
+    break;
   }
 
   /* free communicator of all procs in the same group */
-  MPI_Comm_free(&newcomm);
+  MPI_Comm_free(&comm_fail);
 
   return REDSET_SUCCESS;
 }
@@ -623,6 +641,9 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
     break;
   case REDSET_COPY_XOR:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "XOR");
+    break;
+  case REDSET_COPY_RS:
+    kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "RS");
     break;
   }
 
@@ -701,7 +722,7 @@ int redset_restore_from_kvtree(
   redset_base* d)
 {
   /* it's required that the caller has already initialized the descriptor
-   * and dupped the parent comm before calling this function, if we expose
+   * and dup'ed the parent comm before calling this function, if we expose
    * this function to the user we should revisit this interface */
   // redset_initialize(d);
 
@@ -715,6 +736,7 @@ int redset_restore_from_kvtree(
   MPI_Comm_split(comm, d->group_id, d->rank, &d->comm);
 
   /* fill in state struct depending on copy type */
+  int rs_encoding = 0;
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     break;
@@ -723,6 +745,11 @@ int redset_restore_from_kvtree(
     break;
   case REDSET_COPY_XOR:
     redset_create_xor(comm, d);
+    break;
+  case REDSET_COPY_RS:
+    /* read number of encoding blocks from hash to pass to create call */
+    redset_read_from_kvtree_rs(hash, &rs_encoding);
+    redset_create_rs(comm, d, rs_encoding);
     break;
   }
 
@@ -1012,13 +1039,23 @@ static int redset_encode_reddesc(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
+
+  /* allow redundancy scheme to tack on info if needed */
+  switch (d->type) {
+  case REDSET_COPY_RS:
+    redset_store_to_kvtree_rs(d, desc_hash);
+    break;
+  }
+
   kvtree_set(current_hash, "DESC", desc_hash);
 
   /* copy meta data to hash */
   kvtree* meta_hash = kvtree_new();
   kvtree_setf(meta_hash, current_hash, "%d", rank_world);
 
-  /* apply redundancy to hash data according to selected scheme */
+  /* apply redundancy to hash data according to selected scheme,
+   * we need this hash to be recoverable to the same degree that
+   * the redundancy scheme protects data */
   int rc = REDSET_FAILURE;
   switch (d->type) {
   case REDSET_COPY_SINGLE:
@@ -1030,7 +1067,16 @@ static int redset_encode_reddesc(
   case REDSET_COPY_XOR:
     rc = redset_encode_reddesc_xor(meta_hash, name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_encode_reddesc_rs(meta_hash, name, d);
+    break;
   }
+
+  /* sort the header to be list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(meta_hash);
 
   /* write meta data to file */
   char filename[REDSET_MAX_FILENAME];
@@ -1210,6 +1256,9 @@ int redset_apply(
   case REDSET_COPY_XOR:
     rc = redset_apply_xor(numfiles, files, name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_apply_rs(numfiles, files, name, d);
+    break;
   }
 
   /* determine whether everyone succeeded in their copy */
@@ -1281,6 +1330,9 @@ int redset_recover(
   case REDSET_COPY_XOR:
     rc = redset_recover_xor(name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_recover_rs(name, d);
+    break;
   }
 
   /* determine whether everyone succeeded */
@@ -1315,6 +1367,9 @@ int redset_unapply(
     break;
   case REDSET_COPY_XOR:
     rc = redset_unapply_xor(name, d);
+    break;
+  case REDSET_COPY_RS:
+    rc = redset_unapply_rs(name, d);
     break;
   }
 
@@ -1391,6 +1446,9 @@ redset_filelist redset_filelist_get(
     break;
   case REDSET_COPY_XOR:
     tmp = redset_filelist_get_xor(name, d);
+    break;
+  case REDSET_COPY_RS:
+    tmp = redset_filelist_get_rs(name, d);
     break;
   }
 
