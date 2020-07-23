@@ -56,4 +56,7 @@ int redset_str_sendrecv(
 /** returns true (non-zero) if flag on each process in comm is true */
 int redset_alltrue(int flag, MPI_Comm comm);
 
+/* recursively sort a kvtree in alphabetical order */
+void redset_sort_kvtree(kvtree* hash);
+
 #endif
