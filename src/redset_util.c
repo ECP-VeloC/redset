@@ -217,3 +217,20 @@ int redset_alltrue(int flag, MPI_Comm comm)
   MPI_Allreduce(&flag, &all_true, 1, MPI_INT, MPI_LAND, comm);
   return all_true;
 }
+
+/* recursively sort a kvtree in alphabetical order */
+void redset_sort_kvtree(kvtree* hash)
+{
+  kvtree_elem* elem;
+  for (elem = kvtree_elem_first(hash);
+       elem != NULL;
+       elem = kvtree_elem_next(elem))
+  {
+    kvtree* t = kvtree_elem_hash(elem);
+    redset_sort_kvtree(t);
+  }
+
+  kvtree_sort(hash, KVTREE_SORT_ASCENDING);
+
+  return;
+}
