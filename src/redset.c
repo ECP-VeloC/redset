@@ -344,10 +344,12 @@ static int redset_type_int_from_str(const char* value, int* outtype)
 
 /* build a redundancy descriptor corresponding to the specified hash,
  * this function is collective */
-int redset_create(
+static int redset_create_base(
   int type,
   MPI_Comm comm,
   const char* group_name,
+  int set_size,
+  int k,
   redset* dvp)
 {
   /* allocate a new redset structure */
@@ -356,13 +358,8 @@ int redset_create(
   /* set caller's pointer to record address of redset structure */
   *dvp = (void*) d;
 
-  int SET_SIZE = 8;
-
   /* initialize the descriptor */
   redset_initialize(d);
-
-  /* set redundancy set size */
-  int set_size = SET_SIZE;
 
   /* assume it's enabled, we may turn this bit off later */
   d->enabled = 1;
@@ -429,10 +426,6 @@ int redset_create(
   int group_leader = (d->rank == 0) ? 1 : 0;
   MPI_Allreduce(&group_leader, &d->groups, 1, MPI_INT, MPI_SUM, comm);
 
-  /* TODO: this should be coming in as a user param */
-  /* number of encoding blocks to use in Reed-Solomon */
-  int encoding = 2;
-
   /* fill in state struct depending on copy type */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
@@ -444,7 +437,7 @@ int redset_create(
     redset_create_xor(comm, d);
     break;
   case REDSET_COPY_RS:
-    redset_create_rs(comm, d, encoding);
+    redset_create_rs(comm, d, k);
     break;
   }
 
@@ -452,6 +445,68 @@ int redset_create(
   MPI_Comm_free(&comm_fail);
 
   return REDSET_SUCCESS;
+}
+
+/* build a redundancy descriptor corresponding to the specified hash,
+ * this function is collective */
+int redset_create(
+  int type,
+  MPI_Comm comm,
+  const char* group_name,
+  redset* dvp)
+{
+  int set_size = 8;
+  int k = 2;
+  int rc = redset_create_base(type, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for SINGLE encoding */
+int redset_new_single(
+  MPI_Comm comm,
+  const char* group_name,
+  redset* dvp)
+{
+  int set_size = 8;
+  int k = 2;
+  int rc = redset_create_base(REDSET_COPY_SINGLE, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for PARTNER encoding */
+int redset_new_partner(
+  MPI_Comm comm,
+  const char* group_name,
+  int replicas,
+  redset* dvp)
+{
+  int set_size = 8;
+  int rc = redset_create_base(REDSET_COPY_PARTNER, comm, group_name, set_size, replicas, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for XOR encoding */
+int redset_new_xor(
+  MPI_Comm comm,
+  const char* group_name,
+  int set_size,
+  redset* dvp)
+{
+  int k = 1;
+  int rc = redset_create_base(REDSET_COPY_XOR, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for Reed-Solomon encoding */
+int redset_new_rs(
+  MPI_Comm comm,
+  const char* group_name,
+  int set_size,
+  int k,
+  redset* dvp)
+{
+  int rc = redset_create_base(REDSET_COPY_RS, comm, group_name, set_size, k, dvp);
+  return rc;
 }
 
 /* convert the specified redundancy descritpor into a corresponding
