@@ -57,6 +57,62 @@ static int redset_read_partner_file(
   return 1;
 }
 
+/* given a redundancy descriptor with all top level fields filled in
+ * allocate and fill in structure for partner specific fields in state */
+int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* allocate a new structure to hold partner state */
+  redset_partner* state = (redset_partner*) REDSET_MALLOC(sizeof(redset_partner));
+
+  /* attach structure to reddesc */
+  d->state = (void*) state;
+
+  /* record group rank, world rank, and hostname of left and right partners */
+  redset_set_partners(
+    parent_comm, d->comm, 1,
+    &state->lhs_rank, &state->lhs_rank_world, &state->lhs_hostname,
+    &state->rhs_rank, &state->rhs_rank_world, &state->rhs_hostname
+  );
+
+  /* check that we got valid partners */
+  if (state->lhs_hostname == NULL ||
+      state->rhs_hostname == NULL ||
+      strcmp(state->lhs_hostname, "") == 0 ||
+      strcmp(state->rhs_hostname, "") == 0)
+  {
+    /* disable this descriptor */
+    d->enabled = 0;
+    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
+      __FILE__, __LINE__
+    );
+    rc = REDSET_FAILURE;
+  } else {
+    redset_dbg(2, "LHS partner: %s (%d)  -->  My name: %s (%d)  -->  RHS partner: %s (%d)",
+      state->lhs_hostname, state->lhs_rank_world,
+      redset_hostname, redset_rank,
+      state->rhs_hostname, state->rhs_rank_world
+    );
+  }
+
+  return rc;
+}
+
+int redset_delete_partner(redset_base* d)
+{
+  redset_partner* state = (redset_partner*) d->state;
+  if (state != NULL) {
+    /* free strings that we received */
+    redset_free(&state->lhs_hostname);
+    redset_free(&state->rhs_hostname);
+
+    /* free the structure */
+    redset_free(&d->state);
+  }
+  return REDSET_SUCCESS;
+}
+
 /* copy our redundancy descriptor info to a partner */
 int redset_encode_reddesc_partner(
   kvtree* hash,
