@@ -321,6 +321,12 @@ int redset_apply_xor(
     );
   }
 
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(header);
+
   /* write out the xor chunk header */
   kvtree_write_fd(my_chunk_file, fd_xor, header);
   kvtree_delete(&header);
@@ -583,6 +589,12 @@ int redset_recover_xor_rebuild(
         xor_file, errno, strerror(errno), __FILE__, __LINE__
       );
     }
+
+    /* sort the header to list items alphabetically,
+     * this isn't strictly required, but it ensures the kvtrees
+     * are stored in the same byte order so that we can reproduce
+     * the redundancy file identically on a rebuild */
+    redset_sort_kvtree(header);
 
     /* write XOR chunk file header */
     kvtree_write_fd(xor_file, fd_xor, header);

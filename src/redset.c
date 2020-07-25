@@ -966,7 +966,7 @@ static int redset_encode_reddesc(
     break;
   }
 
-  /* sort the header to be list items alphabetically,
+  /* sort the header to list items alphabetically,
    * this isn't strictly required, but it ensures the kvtrees
    * are stored in the same byte order so that we can reproduce
    * the redundancy file identically on a rebuild */
