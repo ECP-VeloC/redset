@@ -222,6 +222,12 @@ int redset_apply_partner(
     );
   }
 
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(header);
+
   /* write out the partner header */
   kvtree_write_fd(partner_file, fd_partner, header);
   kvtree_delete(&header);
@@ -502,6 +508,12 @@ int redset_recover_partner_rebuild(
         partner_file, errno, strerror(errno), __FILE__, __LINE__
       );
     }
+
+    /* sort the header to list items alphabetically,
+     * this isn't strictly required, but it ensures the kvtrees
+     * are stored in the same byte order so that we can reproduce
+     * the redundancy file identically on a rebuild */
+    redset_sort_kvtree(header);
 
     /* write partner file header */
     kvtree_write_fd(partner_file, fd_partner, header);

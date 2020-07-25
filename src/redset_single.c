@@ -96,6 +96,12 @@ int redset_apply_single(
   kvtree* meta_hash = kvtree_new();
   kvtree_setf(meta_hash, current_hash, "%d", rank_world);
 
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(meta_hash);
+
   /* write meta data to file in directory */
   char filename[REDSET_MAX_FILENAME];
   redset_build_single_filename(name, d, filename, sizeof(filename));
