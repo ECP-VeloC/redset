@@ -49,8 +49,8 @@ typedef struct {
   unsigned int*  gf_log;     /* log_2 table */
   unsigned int*  gf_exp;     /* exp_2 table (inverse log) */
   unsigned int*  gf_imult;   /* computes multiplicative inverse for each value */
-  unsigned int*  mat;        /* encoding matrix (ranks + encoding) x ranks */
   unsigned char* gf_premult; /* pre-computed products for all elements against a constant */
+  unsigned int*  mat;        /* encoding matrix (ranks + encoding) x ranks */
 } redset_reedsolomon;
 
 typedef struct {
@@ -86,9 +86,33 @@ int redset_meta_encode(const char* file, kvtree* meta);
 /* apply file metadata in meta to file */
 int redset_meta_apply(const char* file, const kvtree* meta);
 
-int redset_create_rs(MPI_Comm parent_comm, redset_base* d, int encoding);
+int redset_create_partner(
+  MPI_Comm parent_comm,
+  redset_base* d
+);
 
-int redset_delete_rs(redset_base* d);
+int redset_create_xor(
+  MPI_Comm parent_comm,
+  redset_base* d
+);
+
+int redset_create_rs(
+  MPI_Comm parent_comm,
+  redset_base* d,
+  int encoding
+);
+
+int redset_delete_partner(
+  redset_base* d
+);
+
+int redset_delete_xor(
+  redset_base* d
+);
+
+int redset_delete_rs(
+  redset_base* d
+);
 
 int redset_store_to_kvtree_rs(
   const redset_base* d,
