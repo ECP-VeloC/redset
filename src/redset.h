@@ -53,6 +53,38 @@ int redset_create(
   redset* d          /**< [OUT] - output redundancy descriptor */
 );
 
+/** create a new redundancy set descriptor for SINGLE encoding */
+int redset_new_single(
+  MPI_Comm comm,     /**< [IN]  - process group participating in set */
+  const char* group, /**< [IN]  - string specifying procs in the same failure group */
+  redset* d          /**< [OUT] - output redundancy descriptor */
+);
+
+/** create a new redundancy set descriptor for PARTNER encoding */
+int redset_new_partner(
+  MPI_Comm comm,     /**< [IN]  - process group participating in set */
+  const char* group, /**< [IN]  - string specifying procs in the same failure group */
+  int replicas,      /**< [IN]  - number of partner replicas */
+  redset* d          /**< [OUT] - output redundancy descriptor */
+);
+
+/** create a new redundancy set descriptor for XOR encoding */
+int redset_new_xor(
+  MPI_Comm comm,     /**< [IN]  - process group participating in set */
+  const char* group, /**< [IN]  - string specifying procs in the same failure group */
+  int size,          /**< [IN]  - minimum number of ranks for a redundancy set */
+  redset* d          /**< [OUT] - output redundancy descriptor */
+);
+
+/** create a new redundancy set descriptor for ReedSolomon encoding */
+int redset_new_rs(
+  MPI_Comm comm,     /**< [IN]  - process group participating in set */
+  const char* group, /**< [IN]  - string specifying procs in the same failure group */
+  int size,          /**< [IN]  - minimum number of ranks for a redundancy set */
+  int k,             /**< [IN]  - number of encoding blocks [1,size) */
+  redset* d          /**< [OUT] - output redundancy descriptor */
+);
+
 /** free any memory associated with the specified redundancy descriptor */
 int redset_delete(
   redset* d /**< [INOUT] - redundancy descriptor to be freed */
