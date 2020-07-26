@@ -456,7 +456,12 @@ int redset_create(
   redset* dvp)
 {
   int set_size = 8;
-  int k = 2;
+
+  int k = 1;
+  if (type == REDSET_COPY_RS) {
+    k = 2;
+  }
+
   int rc = redset_create_base(type, comm, group_name, set_size, k, dvp);
   return rc;
 }
