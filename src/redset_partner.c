@@ -46,15 +46,15 @@ static int redset_read_partner_file(
     redset_dbg(2, "Do not have read access to file: %s @ %s:%d",
       file, __FILE__, __LINE__
     );
-    return 0;
+    return REDSET_FAILURE;
   }
 
   /* read partner header from file */
   if (kvtree_read_file(file, header) != KVTREE_SUCCESS) {
-    return 0;
+    return REDSET_FAILURE;
   }
 
-  return 1;
+  return REDSET_SUCCESS;
 }
 
 /* given a redundancy descriptor with all top level fields filled in
@@ -220,45 +220,15 @@ int redset_apply_partner(
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
 
-  /* record total number of files we have */
-  kvtree_set_kv_int(current_hash, "FILES", numfiles);
+  /* record info about our data files */
+  redset_file_encode_kvtree(current_hash, numfiles, files);
 
-  /* allocate arrays to hold file descriptors, filenames, and filesizes for each of our files */
-  int* fds                 = (int*)           REDSET_MALLOC(numfiles * sizeof(int));
-  const char** filenames   = (const char**)   REDSET_MALLOC(numfiles * sizeof(char*));
-  unsigned long* filesizes = (unsigned long*) REDSET_MALLOC(numfiles * sizeof(unsigned long));
-
-  /* enter index, name, and size of each file */
-  unsigned long bytes = 0;
-  kvtree* files_hash = kvtree_set(current_hash, "FILE", kvtree_new());
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    const char* file_name = files[i];
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* total up number of bytes in our files */
-    bytes += file_size;
-
-    /* add entry for this file, including its index and name */
-    kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
-
-    /* record file meta data of this file */
-    redset_meta_encode(file_name, file_hash);
-
-    /* record entry in our names and sizes array */
-    filenames[i] = file_name;
-    filesizes[i] = file_size;
-
-    /* open the file */
-    fds[i] = redset_open(file_name, O_RDONLY);
-    if (fds[i] < 0) {
-      /* TODO: try again? */
-      redset_abort(-1, "Opening checkpoint file for copying: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-        file_name, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
+  /* open our logical file for reading */
+  redset_file rsf;
+  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    redset_abort(-1, "Opening data files for copying: @ %s:%d",
+      __FILE__, __LINE__
+    );
   }
 
   /* store our redundancy descriptor in hash */
@@ -298,7 +268,7 @@ int redset_apply_partner(
   if (fd_partner < 0) {
     /* TODO: try again? */
     redset_abort(-1, "Opening partner file for writing: redset_open(%s) errno=%d %s @ %s:%d",
-            partner_file, errno, strerror(errno), __FILE__, __LINE__
+      partner_file, errno, strerror(errno), __FILE__, __LINE__
     );
   }
 
@@ -321,8 +291,10 @@ int redset_apply_partner(
   /* allocate a receive buffer for each partner */
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
+  /* number of bytes summed across all of our files */
+  unsigned long outgoing = redset_file_bytes(&rsf);
+
   /* determine how many bytes are coming from each of our partners */
-  unsigned long outgoing = bytes;
   unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
   unsigned long* received = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
   unsigned long* offsets  = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
@@ -392,8 +364,7 @@ int redset_apply_partner(
 
     /* read data from files */
     if (send_count > 0) {
-      if (redset_read_pad_n(numfiles, filenames, fds,
-        send_bufs[0], send_count, send_offset, filesizes) != REDSET_SUCCESS)
+      if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
       {
         rc = REDSET_FAILURE;
       }
@@ -459,11 +430,9 @@ int redset_apply_partner(
     rc = REDSET_FAILURE;
   }
 
-  /* close my checkpoint files */
-  for (i=0; i < numfiles; i++) {
-    if (redset_close(filenames[i], fds[i]) != REDSET_SUCCESS) {
-      rc = REDSET_FAILURE;
-    }
+  /* close my data files */
+  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+    rc = REDSET_FAILURE;
   }
 
   /* free the buffers */
@@ -477,76 +446,7 @@ int redset_apply_partner(
   redset_free(&request);
   redset_free(&status);
 
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
-
   return rc;
-}
-
-static int redset_partner_check_files(const kvtree* hash)
-{
-  if (hash == NULL) {
-    return 0;
-  }
-
-  /* assume we have our files */
-  int have_files = 1;
-
-  /* read total number of files we have */
-  int numfiles;
-  if (kvtree_util_get_int(hash, "FILES", &numfiles) == KVTREE_SUCCESS) {
-//  if (numfiles != numfiles_saved) {
-//    valid = 0;
-//  }
-  } else {
-    /* number of files not recorded */
-    have_files = 0;
-  }
-
-  /* verify that we have each file and that the size is correct for each one */
-  int i;
-  kvtree* files_hash = kvtree_get(hash, "FILE");
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-    kvtree_elem* elem = kvtree_elem_first(index_hash);
-    const char* file_name = kvtree_elem_key(elem);
-
-    /* lookup hash for this file */
-    kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-    if (file_hash == NULL) {
-      /* failed to find file name recorded */
-      have_files = 0;
-      continue;
-    }
-
-    /* check that file exists */
-    if (redset_file_exists(file_name) != REDSET_SUCCESS) {
-      /* failed to find file */
-      have_files = 0;
-      continue;
-    }
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* lookup expected file size and compare to actual size */
-    unsigned long file_size_saved;
-    if (kvtree_util_get_bytecount(file_hash, "SIZE", &file_size_saved) == KVTREE_SUCCESS) {
-      if (file_size != file_size_saved) {
-        /* file size does not match */
-        have_files = 0;
-        continue;
-      }
-    } else {
-      /* file size not recorded */
-      have_files = 0;
-      continue;
-    }
-  }
-
-  return have_files;
 }
 
 int redset_recover_partner_rebuild(
@@ -629,12 +529,8 @@ int redset_recover_partner_rebuild(
     return REDSET_FAILURE;
   }
 
-  int num_files = 0;
+  redset_file rsf;
   int fd_partner = -1;
-  int* fds = NULL;
-  const char** filenames = NULL;
-  unsigned long* filesizes = NULL;
-  unsigned long bytes = 0;
 
   kvtree* send_hash = NULL;
   kvtree* recv_hash = NULL;
@@ -672,55 +568,11 @@ int redset_recover_partner_rebuild(
     /* get file info for this rank */
     current_hash = kvtree_getf(header, "%d", d->rank);
 
-    /* lookup number of files this process wrote */
-    if (kvtree_util_get_int(current_hash, "FILES", &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from redundancy file header: %s @ %s:%d",
+    /* open our logical file for reading */
+    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files to read for rebuild: %s @ %s:%d",
         partner_file, __FILE__, __LINE__
       );
-    }
-
-    /* allocate arrays to hold file descriptors, filenames, and filesizes for each of our files */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
-
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in redundancy file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* sum up bytes in our of our files */
-      bytes += filesizes[i];
-
-      /* open the file for reading */
-      fds[i] = redset_open(file_name, O_RDONLY);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening file for reading in rebuild: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-          file_name, errno, strerror(errno), __FILE__, __LINE__
-        );
-      }
     }
 
     /* if failed rank is to my left, i have its file info, send it the header */
@@ -776,58 +628,14 @@ int redset_recover_partner_rebuild(
       kvtree_unset(header, rankstr);
     }
 
-    /* get the number of files that we need to rebuild */
-    if (kvtree_util_get_int(current_hash, "FILES", &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from redundancy file header during rebuild @ %s:%d",
-        __FILE__, __LINE__
-      );
-    }
-
-    /* allocate items for each file */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
-
     /* get permissions for file */
     mode_t mode_file = redset_getmode(1, 1, 0);
 
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in redundancy file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* sum up bytes in our of our files */
-      bytes += filesizes[i];
-
-      /* open my file for writing */
-      fds[i] = redset_open(filenames[i], O_RDWR | O_CREAT | O_TRUNC, mode_file);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening file for writing in rebuild: redset_open(%s) errno=%d %s @ %s:%d",
-          filenames[i], errno, strerror(errno), __FILE__, __LINE__
-        );
-      }
+    /* open our logical file for writing */
+    if (redset_file_open(current_hash, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
+        __FILE__, __LINE__
+      );
     }
 
     /* open my redundancy file for writing */
@@ -899,6 +707,9 @@ int redset_recover_partner_rebuild(
 
   /* allocate a receive buffer for each partner */
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
+
+  /* get file size of our logical file */
+  unsigned long bytes = redset_file_bytes(&rsf);
 
   unsigned long outgoing = bytes;
   unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
@@ -995,8 +806,7 @@ int redset_recover_partner_rebuild(
           MPI_Recv(recv_bufs[i], count, MPI_BYTE, rhs_rank, 0, d->comm, &status[0]);
 
           /* write data to the logical file */
-          if (redset_write_pad_n(num_files, filenames, fds,
-            recv_bufs[i], count, offset, filesizes) != REDSET_SUCCESS)
+          if (redset_file_pwrite(&rsf, recv_bufs[i], count, offset) != REDSET_SUCCESS)
           {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -1065,8 +875,7 @@ int redset_recover_partner_rebuild(
     if (need_send) {
       /* read data from files */
       if (send_count > 0) {
-        if (redset_read_pad_n(num_files, filenames, fds,
-          send_bufs[0], send_count, send_offset, filesizes) != REDSET_SUCCESS)
+        if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -1140,29 +949,14 @@ int redset_recover_partner_rebuild(
     rc = REDSET_FAILURE;
   }
 
-  /* close my checkpoint files */
-  for (i=0; i < num_files; i++) {
-    if (redset_close(filenames[i], fds[i]) != REDSET_SUCCESS) {
-      rc = REDSET_FAILURE;
-    }
+  /* close my data files */
+  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+    rc = REDSET_FAILURE;
   }
- 
+
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
   if (need_files) {
-    /* we've written data for all files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* set metadata properties on rebuilt file */
-      redset_meta_apply(file_name, file_hash);
-    }
+    redset_file_apply_meta(current_hash);
   }
 
   /* free the buffers */
@@ -1179,9 +973,6 @@ int redset_recover_partner_rebuild(
   redset_buffers_free(state->replicas, &recv_bufs);
   redset_buffers_free(1, &send_bufs);
 
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
   kvtree_delete(&header);
 
   return rc;
@@ -1194,29 +985,21 @@ int redset_recover_partner(
   int rc = REDSET_SUCCESS;
   MPI_Comm comm_world = d->parent_comm;
 
-  /* get name of partner file */
-  char partner_file[REDSET_MAX_FILENAME];
-  redset_build_partner_filename(name, d, partner_file, sizeof(partner_file));
-
   /* assume we have our files */
   int have_my_files = 1;
 
   /* check whether we have our files and our partner's files */
   kvtree* header = kvtree_new();
-  if (redset_read_partner_file(name, d, header)) {
+  if (redset_read_partner_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
     kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
-    if (! redset_partner_check_files(current_hash)) {
+    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       have_my_files = 0;
     }
-
-    /* TODO: how to verify that partner file is valid? */
   } else {
     /* failed to read partner file */
     have_my_files = 0;
   }
-
-  /* delete the hash */
   kvtree_delete(&header);
 
   /* attempt to rebuild if any process is missing its files */
