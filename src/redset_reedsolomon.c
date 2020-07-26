@@ -1465,8 +1465,10 @@ int redset_recover_rs_rebuild(
     /* get offset into file immediately following the header */
     header_size = lseek(fd_chunk, 0, SEEK_CUR);
 
-    /* lookup number of files this process wrote */
+    /* get file info for this rank */
     current_hash = kvtree_getf(header, "%d", d->rank);
+
+    /* lookup number of files this process wrote */
     if (kvtree_util_get_int(current_hash, REDSET_KEY_COPY_RS_FILES, &num_files) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to read number of files from redundancy file header: %s @ %s:%d",
         chunk_file, __FILE__, __LINE__
@@ -1550,9 +1552,7 @@ int redset_recover_rs_rebuild(
     /* get our current hash from header we received */
     current_hash = kvtree_getf(header, "%d", d->rank);
 
-    /* unset descriptors for ranks other than our partners,
-     * we do this deleting entries for ranks that would have
-     * sent their descriptor to the source who sent us its header */
+    /* unset descriptors for ranks other than our partners */
     for (i = 0; i < state->encoding; i++) {
       /* step through entries the source rank would have */
       int lhs_rank = (source_rank - i + d->ranks) % d->ranks;
@@ -1566,6 +1566,8 @@ int redset_recover_rs_rebuild(
       /* have to define the rank as a string */
       char rankstr[1024];
       snprintf(rankstr, sizeof(rankstr), "%d", lhs_rank);
+
+      /* now we can delete this entry */
       kvtree_unset(header, rankstr);
     }
 
