@@ -431,7 +431,7 @@ static int redset_create_base(
   case REDSET_COPY_SINGLE:
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(comm, d);
+    redset_create_partner(comm, d, k);
     break;
   case REDSET_COPY_XOR:
     redset_create_xor(comm, d);
@@ -532,12 +532,14 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
     break;
   case REDSET_COPY_PARTNER:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "PARTNER");
+    redset_store_to_kvtree_partner(d, hash);
     break;
   case REDSET_COPY_XOR:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "XOR");
     break;
   case REDSET_COPY_RS:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "RS");
+    redset_store_to_kvtree_rs(d, hash);
     break;
   }
 
@@ -630,12 +632,14 @@ int redset_restore_from_kvtree(
   MPI_Comm_split(comm, d->group_id, d->rank, &d->comm);
 
   /* fill in state struct depending on copy type */
+  int partner_replicas = 0;
   int rs_encoding = 0;
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(comm, d);
+    redset_read_from_kvtree_partner(hash, &partner_replicas);
+    redset_create_partner(comm, d, partner_replicas);
     break;
   case REDSET_COPY_XOR:
     redset_create_xor(comm, d);
@@ -933,13 +937,6 @@ static int redset_encode_reddesc(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
-
-  /* allow redundancy scheme to tack on info if needed */
-  switch (d->type) {
-  case REDSET_COPY_RS:
-    redset_store_to_kvtree_rs(d, desc_hash);
-    break;
-  }
 
   kvtree_set(current_hash, "DESC", desc_hash);
 

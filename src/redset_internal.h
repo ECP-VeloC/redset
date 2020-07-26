@@ -23,6 +23,7 @@ typedef struct {
   int       rhs_rank;       /* rank which is one more (with wrap to lowest) within set */
   int       rhs_rank_world; /* rank of rhs process in comm world */
   char*     rhs_hostname;   /* hostname of rhs process */
+  int       replicas;       /* number of partner replicas */
 } redset_partner;
 
 typedef struct {
@@ -88,7 +89,8 @@ int redset_meta_apply(const char* file, const kvtree* meta);
 
 int redset_create_partner(
   MPI_Comm parent_comm,
-  redset_base* d
+  redset_base* d,
+  int replicas
 );
 
 int redset_create_xor(
@@ -112,6 +114,16 @@ int redset_delete_xor(
 
 int redset_delete_rs(
   redset_base* d
+);
+
+int redset_store_to_kvtree_partner(
+  const redset_base* d,
+  kvtree* hash
+);
+
+int redset_read_from_kvtree_partner(
+  const kvtree* hash,
+  int* outreplicas
 );
 
 int redset_store_to_kvtree_rs(
