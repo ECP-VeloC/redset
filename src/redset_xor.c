@@ -19,9 +19,6 @@
 
 #define REDSET_KEY_COPY_XOR_CURRENT "CURRENT"
 #define REDSET_KEY_COPY_XOR_PARTNER "PARTNER"
-#define REDSET_KEY_COPY_XOR_FILES "FILES"
-#define REDSET_KEY_COPY_XOR_FILE  "FILE"
-#define REDSET_KEY_COPY_XOR_SIZE  "SIZE"
 #define REDSET_KEY_COPY_XOR_CHUNK "CHUNK"
 
 /*
@@ -56,15 +53,15 @@ static int redset_read_xor_file(
     redset_dbg(2, "Do not have read access to file: %s @ %s:%d",
       file, __FILE__, __LINE__
     );
-    return 0;
+    return REDSET_FAILURE;
   }
 
   /* read xor header info from file */
   if (kvtree_read_file(file, header) != KVTREE_SUCCESS) {
-    return 0;
+    return REDSET_FAILURE;
   }
 
-  return 1;
+  return REDSET_SUCCESS;
 }
 
 #define REDSET_KEY_COPY_XOR_RANKS "RANKS"
@@ -218,47 +215,22 @@ int redset_apply_xor(
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
   unsigned char* recv_buf = recv_bufs[0];
 
-  /* allocate space in structures for each file */
-  int* fds = (int*) REDSET_MALLOC(numfiles * sizeof(int));
-  const char** filenames = (const char**) REDSET_MALLOC(numfiles * sizeof(char*));
-  unsigned long* filesizes = (unsigned long*) REDSET_MALLOC(numfiles * sizeof(unsigned long));
-
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
 
-  /* record total number of files we have */
-  kvtree_set_kv_int(current_hash, REDSET_KEY_COPY_XOR_FILES, numfiles);
+  /* encode file info into hash */
+  redset_file_encode_kvtree(current_hash, numfiles, files);
 
-  /* enter index, name, and size of each file */
-  unsigned long my_bytes = 0;
-  kvtree* files_hash = kvtree_set(current_hash, "FILE", kvtree_new());
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    const char* file_name = files[i];
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-    my_bytes += file_size;
-
-    /* add entry for this file, including its index, name, and size */
-    kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
-
-    /* record file meta data of this file */
-    redset_meta_encode(file_name, file_hash);
-
-    /* record entry in our names and sizes arrays */
-    filenames[i] = file_name;
-    filesizes[i] = file_size;
-
-    /* open the file */
-    fds[i] = redset_open(file_name, O_RDONLY);
-    if (fds[i] < 0) {
-      /* TODO: try again? */
-      redset_abort(-1, "Opening checkpoint file for copying: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-                file_name, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
+  /* open our logical file for reading */
+  redset_file rsf;
+  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    redset_abort(-1, "Opening data files for copying: @ %s:%d",
+      __FILE__, __LINE__
+    );
   }
+
+  /* get size of our logical file */
+  unsigned long my_bytes = redset_file_bytes(&rsf);
 
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
@@ -343,8 +315,7 @@ int redset_apply_xor(
           chunk_id_rel--;
         }
         unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-        if (redset_read_pad_n(numfiles, filenames, fds,
-          send_buf, count, offset, filesizes) != REDSET_SUCCESS)
+        if (redset_file_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -382,14 +353,9 @@ int redset_apply_xor(
   }
 
   /* close my dataset files */
-  for (i=0; i < numfiles; i++) {
-    redset_close(filenames[i], fds[i]);
-  }
+  redset_file_close(&rsf);
 
   /* free the buffers */
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
   redset_buffers_free(1, &send_bufs);
   redset_buffers_free(1, &recv_bufs);
 
@@ -415,10 +381,8 @@ int redset_recover_xor_rebuild(
   int i;
   MPI_Status status[2];
 
+  redset_file rsf;
   int fd_xor = -1;
-  int* fds = NULL;
-  const char** filenames = NULL;
-  unsigned long* filesizes = NULL;
 
   /* get pointer to XOR state structure */
   redset_xor* state = (redset_xor*) d->state;
@@ -444,53 +408,14 @@ int redset_recover_xor_rebuild(
     /* read in the xor chunk header */
     kvtree_read_fd(xor_file, fd_xor, header);
 
-    /* lookup number of files this process wrote */
+    /* lookup our file info */
     current_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_CURRENT);
-    if (kvtree_util_get_int(current_hash, REDSET_KEY_COPY_XOR_FILES, &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from XOR file header: %s @ %s:%d",
-        xor_file, __FILE__, __LINE__
+
+    /* open our data files for reading */
+    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files for reading during rebuild @ %s:%d",
+        __FILE__, __LINE__
       );
-    }
-
-    /* allocate arrays to hold file descriptors, filenames, and filesizes for each of our files */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
-
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in XOR file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* open the file for reading */
-      fds[i] = redset_open(file_name, O_RDONLY);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening checkpoint file for reading in XOR rebuild: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-          file_name, errno, strerror(errno), __FILE__, __LINE__
-        );
-      }
     }
 
     /* if failed rank is to my left, i have the meta for it files, send it the header */
@@ -522,55 +447,14 @@ int redset_recover_xor_rebuild(
     kvtree_recv(partner_hash, state->lhs_rank, d->comm);
     kvtree_set(header, REDSET_KEY_COPY_XOR_PARTNER, partner_hash);
 
-    /* get the number of files that we need to rebuild */
-    if (kvtree_util_get_int(current_hash, REDSET_KEY_COPY_XOR_FILES, &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from XOR file header during rebuild @ %s:%d",
-        __FILE__, __LINE__
-      );
-    }
-
-    /* allocate items for each file */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
-
     /* get permissions for file */
     mode_t mode_file = redset_getmode(1, 1, 0);
 
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in XOR file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* open my file for writing */
-      fds[i] = redset_open(filenames[i], O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening file for writing in XOR rebuild: redset_open(%s) errno=%d %s @ %s:%d",
-          filenames[i], errno, strerror(errno), __FILE__, __LINE__
-        );
-      }
+    /* get the number of files that we need to rebuild */
+    if (redset_file_open(current_hash, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
+        __FILE__, __LINE__
+      );
     }
 
     /* open my xor file for writing */
@@ -623,8 +507,7 @@ int redset_recover_xor_rebuild(
         /* read the next set of bytes for this chunk from my file into send_buf */
         if (chunk_id != d->rank) {
           /* for this chunk, read data from the logical file */
-          if (redset_read_pad_n(num_files, filenames, fds,
-            send_buf, count, offset, filesizes) != REDSET_SUCCESS)
+          if (redset_file_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
           {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -656,8 +539,7 @@ int redset_recover_xor_rebuild(
         /* if this is not my xor chunk, write data to normal file, otherwise write to my xor chunk */
         if (chunk_id != d->rank) {
           /* for this chunk, write data to the logical file */
-          if (redset_write_pad_n(num_files, filenames, fds,
-                              recv_buf, count, offset, filesizes) != REDSET_SUCCESS)
+          if (redset_file_pwrite(&rsf, recv_buf, count, offset) != REDSET_SUCCESS)
           {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -682,10 +564,8 @@ int redset_recover_xor_rebuild(
   }
 
   /* close my checkpoint files */
-  for (i=0; i < num_files; i++) {
-    if (redset_close(filenames[i], fds[i]) != REDSET_SUCCESS) {
-      rc = REDSET_FAILURE;
-    }
+  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+    rc = REDSET_FAILURE;
   }
 
 #if 0
@@ -724,31 +604,12 @@ int redset_recover_xor_rebuild(
 
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
   if (root == d->rank) {
-    /* get pointer to our current hash */
-    kvtree* current_hash = kvtree_get(header, "CURRENT");
-
-    /* we've written data for all files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* set metadata properties on rebuilt file */
-      redset_meta_apply(file_name, file_hash);
-    }
+    redset_file_apply_meta(current_hash);
   }
 
   /* free the buffers */
   redset_buffers_free(1, &recv_bufs);
   redset_buffers_free(1, &send_bufs);
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
   kvtree_delete(&header);
 
   return rc;
@@ -762,79 +623,23 @@ int redset_recover_xor(
   int i;
   MPI_Comm comm_world = d->parent_comm;
 
-  /* set chunk filenames of form: xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
-  char xor_file[REDSET_MAX_FILENAME];
-  redset_build_xor_filename(name, d, xor_file, sizeof(xor_file));
-
   /* assume we have our files */
-  int have_my_files = 1;
+  int need_rebuild = 0;
 
   /* check whether we have our XOR file */
   kvtree* header = kvtree_new();
-  if (redset_read_xor_file(name, d, header)) {
+  if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
     /* got our XOR file, see if we have each data file */
     kvtree* current_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_CURRENT);
-
-    /* lookup number of files this process wrote */
-    int numfiles;
-    if (kvtree_util_get_int(current_hash, REDSET_KEY_COPY_XOR_FILES, &numfiles) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from XOR file header: %s @ %s:%d",
-        xor_file, __FILE__, __LINE__
-      );
-    }
-
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < numfiles; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-      if (file_hash == NULL) {
-        /* failed to find file name recorded */
-        have_my_files = 0;
-        continue;
-      }
-  
-      /* check that file exists */
-      if (redset_file_exists(file_name) != REDSET_SUCCESS) {
-        /* failed to find file */
-        have_my_files = 0;
-        continue;
-      }
-  
-      /* get file size of this file */
-      unsigned long file_size = redset_file_size(file_name);
-  
-      /* lookup expected file size and compare to actual size */
-      unsigned long file_size_saved;
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &file_size_saved) == KVTREE_SUCCESS) {
-        if (file_size != file_size_saved) {
-          /* file size does not match */
-          have_my_files = 0;
-          continue;
-        }
-      } else {
-        /* file size not recorded */
-        have_my_files = 0;
-        continue;
-      }
+    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+      /* some data file is bad */
+      need_rebuild = 1;
     }
   } else {
     /* missing our XOR file */
-    have_my_files = 0;
+    need_rebuild = 1;
   }
-
   kvtree_delete(&header);
-
-  /* check whether I have my full checkpoint file, assume I don't */
-  int need_rebuild = 1;
-  if (have_my_files) {
-    need_rebuild = 0;
-  }
 
   /* count how many in my xor set need to rebuild */
   int total_rebuild;
