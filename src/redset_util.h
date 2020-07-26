@@ -59,4 +59,10 @@ int redset_alltrue(int flag, MPI_Comm comm);
 /* recursively sort a kvtree in alphabetical order */
 void redset_sort_kvtree(kvtree* hash);
 
+/* allocate a set of buffers for MPI communication or redundancy encoding */
+void** redset_buffers_alloc(int num, size_t size);
+
+/* free a set of buffers allocated in redset_buffers_alloc */
+void redset_buffers_free(int num, void* pbufs);
+
 #endif

@@ -211,20 +211,12 @@ int redset_apply_xor(
   redset_xor* state = (redset_xor*) d->state;
 
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-            redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* send_buf = send_bufs[0];
 
   /* allocate buffer to read a piece of the recevied chunk file */
-  char* recv_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (recv_buf == NULL) {
-    redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-            redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* recv_buf = recv_bufs[0];
 
   /* allocate space in structures for each file */
   int* fds = (int*) REDSET_MALLOC(numfiles * sizeof(int));
@@ -352,7 +344,7 @@ int redset_apply_xor(
         }
         unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
         if (redset_read_pad_n(numfiles, filenames, fds,
-                             send_buf, count, offset, filesizes) != REDSET_SUCCESS)
+          send_buf, count, offset, filesizes) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -398,8 +390,8 @@ int redset_apply_xor(
   redset_free(&filesizes);
   redset_free(&filenames);
   redset_free(&fds);
-  redset_align_free(&send_buf);
-  redset_align_free(&recv_buf);
+  redset_buffers_free(1, &send_bufs);
+  redset_buffers_free(1, &recv_bufs);
 
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
@@ -609,20 +601,12 @@ int redset_recover_xor_rebuild(
   }
 
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* send_buf = send_bufs[0];
 
   /* allocate buffer to read a piece of the recevied chunk file */
-  char* recv_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (recv_buf == NULL) {
-    redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* recv_buf = recv_bufs[0];
 
   /* Pipelined XOR Reduce to root */
   unsigned long offset = 0;
@@ -640,7 +624,7 @@ int redset_recover_xor_rebuild(
         if (chunk_id != d->rank) {
           /* for this chunk, read data from the logical file */
           if (redset_read_pad_n(num_files, filenames, fds,
-                             send_buf, count, offset, filesizes) != REDSET_SUCCESS)
+            send_buf, count, offset, filesizes) != REDSET_SUCCESS)
           {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -760,8 +744,8 @@ int redset_recover_xor_rebuild(
   }
 
   /* free the buffers */
-  redset_align_free(&recv_buf);
-  redset_align_free(&send_buf);
+  redset_buffers_free(1, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
   redset_free(&filesizes);
   redset_free(&filenames);
   redset_free(&fds);

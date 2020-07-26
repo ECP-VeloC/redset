@@ -234,3 +234,52 @@ void redset_sort_kvtree(kvtree* hash)
 
   return;
 }
+
+/* allocate a set of num buffers each of size bytes for MPI communication or redundancy encoding */
+void** redset_buffers_alloc(int num, size_t size)
+{
+  /* invalid array size */
+  if (num <= 0) {
+    return NULL;
+  }
+
+  /* allocate an array of num pointers */
+  void** bufs = (void**) REDSET_MALLOC(num * sizeof(void*));
+
+  /* allocate num buffers each of size bytes */
+  int i;
+  for (i = 0; i < num; i++) {
+    if (size > 0) {
+      /* allocate buffer of size bytes aligned on memory page boundary */
+      bufs[i] = redset_align_malloc(size, redset_page_size);
+      if (bufs[i] == NULL) {
+        redset_abort(-1, "Allocating memory for buffer: malloc(%d) errno=%d %s @ %s:%d",
+          size, errno, strerror(errno), __FILE__, __LINE__
+        );
+      }
+    } else {
+      /* for size == 0, just set each pointer to NULL */
+      bufs[i] = NULL;
+    }
+  }
+
+  return bufs;
+}
+
+/* free a set of buffers allocated in redset_buffers_alloc */
+void redset_buffers_free(int num, void* pbufs)
+{
+  if (pbufs != NULL) {
+    /* free each buffer */
+    int i;
+    void** bufs = *(void***)pbufs;
+    for (i = 0; i < num; i++) {
+      redset_align_free(&bufs[i]);
+    }
+
+    /* free the array of pointers and clear the caller's pointer */
+    redset_free(pbufs);
+  }
+
+  return;
+}

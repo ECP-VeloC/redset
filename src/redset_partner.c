@@ -316,24 +316,10 @@ int redset_apply_partner(
   off_t header_size = lseek(fd_partner, 0, SEEK_CUR);
 
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
 
   /* allocate a receive buffer for each partner */
-  unsigned char** recv_bufs = (unsigned char**) REDSET_MALLOC(state->replicas * sizeof(unsigned char*));
-  for (i = 0; i < state->replicas; i++) {
-    /* allocate buffer to read a piece of the recevied chunk file */
-    recv_bufs[i] = (unsigned char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (recv_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-  }
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
   /* determine how many bytes are coming from each of our partners */
   unsigned long outgoing = bytes;
@@ -407,7 +393,7 @@ int redset_apply_partner(
     /* read data from files */
     if (send_count > 0) {
       if (redset_read_pad_n(numfiles, filenames, fds,
-        send_buf, send_count, send_offset, filesizes) != REDSET_SUCCESS)
+        send_bufs[0], send_count, send_offset, filesizes) != REDSET_SUCCESS)
       {
         rc = REDSET_FAILURE;
       }
@@ -420,7 +406,7 @@ int redset_apply_partner(
 
       /* send data if we have any */
       if (send_count > 0) {
-        MPI_Isend(send_buf, send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
+        MPI_Isend(send_bufs[0], send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
         k++;
       }
     }
@@ -481,11 +467,8 @@ int redset_apply_partner(
   }
 
   /* free the buffers */
-  for (i = 0; i < state->replicas; i++) {
-    redset_free(&recv_bufs[i]);
-  }
-  redset_free(&recv_bufs);
-  redset_align_free(&send_buf);
+  redset_buffers_free(state->replicas, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
 
   redset_free(&incoming);
   redset_free(&received);
@@ -912,24 +895,10 @@ int redset_recover_partner_rebuild(
   kvtree_delete(&send_hash);
 
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
 
   /* allocate a receive buffer for each partner */
-  unsigned char** recv_bufs = (unsigned char**) REDSET_MALLOC(state->replicas * sizeof(unsigned char*));
-  for (i = 0; i < state->replicas; i++) {
-    /* allocate buffer to read a piece of the recevied chunk file */
-    recv_bufs[i] = (unsigned char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (recv_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-  }
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
   unsigned long outgoing = bytes;
   unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
@@ -987,13 +956,13 @@ int redset_recover_partner_rebuild(
           if (redset_lseek(partner_file, fd_partner, offset, SEEK_SET) != REDSET_SUCCESS) {
             rc = REDSET_FAILURE;
           }
-          if (redset_read_attempt(partner_file, fd_partner, send_buf, count) != count) {
+          if (redset_read_attempt(partner_file, fd_partner, send_bufs[0], count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
 
           /* send data to left partner */
-          MPI_Send(send_buf, count, MPI_BYTE, lhs_rank, 0, d->comm);
+          MPI_Send(send_bufs[0], count, MPI_BYTE, lhs_rank, 0, d->comm);
 
           /* sum up the bytes we've sent so far */
           received[i] += count;
@@ -1097,7 +1066,7 @@ int redset_recover_partner_rebuild(
       /* read data from files */
       if (send_count > 0) {
         if (redset_read_pad_n(num_files, filenames, fds,
-          send_buf, send_count, send_offset, filesizes) != REDSET_SUCCESS)
+          send_bufs[0], send_count, send_offset, filesizes) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -1111,7 +1080,7 @@ int redset_recover_partner_rebuild(
 
           /* send data if we have any */
           if (send_count > 0) {
-            MPI_Isend(send_buf, send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
+            MPI_Isend(send_bufs[0], send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
             k++;
           }
         }
@@ -1207,11 +1176,8 @@ int redset_recover_partner_rebuild(
   redset_free(&received);
   redset_free(&offsets);
 
-  for (i = 0; i < state->replicas; i++) {
-    redset_free(&recv_bufs[i]);
-  }
-  redset_free(&recv_bufs);
-  redset_align_free(&send_buf);
+  redset_buffers_free(state->replicas, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
 
   redset_free(&filesizes);
   redset_free(&filenames);
