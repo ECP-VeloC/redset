@@ -17,8 +17,6 @@
 #include "redset.h"
 #include "redset_internal.h"
 
-#define REDSET_KEY_COPY_XOR_CURRENT "CURRENT"
-#define REDSET_KEY_COPY_XOR_PARTNER "PARTNER"
 #define REDSET_KEY_COPY_XOR_CHUNK "CHUNK"
 
 /*
@@ -243,8 +241,8 @@ int redset_apply_xor(
 
   /* copy meta data to hash */
   kvtree* header = kvtree_new();
-  kvtree_set(header, REDSET_KEY_COPY_XOR_CURRENT, current_hash);
-  kvtree_set(header, REDSET_KEY_COPY_XOR_PARTNER, partner_hash);
+  kvtree_setf(header, current_hash, "%d", d->rank);
+  kvtree_setf(header, partner_hash, "%d", state->lhs_rank);
 
   /* record the global ranks of the processes in our xor group */
   kvtree_merge(header, state->group_map);
@@ -409,7 +407,7 @@ int redset_recover_xor_rebuild(
     kvtree_read_fd(xor_file, fd_xor, header);
 
     /* lookup our file info */
-    current_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_CURRENT);
+    current_hash = kvtree_getf(header, "%d", d->rank);
 
     /* open our data files for reading */
     if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
@@ -433,19 +431,21 @@ int redset_recover_xor_rebuild(
      * the checkpoint id and the chunk size */
     kvtree_recv(header, state->rhs_rank, d->comm);
 
-    /* rename PARTNER to CURRENT in our header */
-    current_hash = kvtree_new();
-    kvtree* old_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_PARTNER);
-    kvtree_merge(current_hash, old_hash);
-    kvtree_unset(header, REDSET_KEY_COPY_XOR_CURRENT);
-    kvtree_unset(header, REDSET_KEY_COPY_XOR_PARTNER);
-    kvtree_set(header, REDSET_KEY_COPY_XOR_CURRENT, current_hash);
+    /* get our file info */
+    current_hash = kvtree_getf(header, "%d", d->rank);
+
+    /* unset file info for rank who sent this to us */
+    /* TODO: do this more cleanly */
+    /* have to define the rank as a string */
+    char rankstr[1024];
+    snprintf(rankstr, sizeof(rankstr), "%d", state->rhs_rank);
+    kvtree_unset(header, rankstr);
 
     /* receive number of files our left-side partner has and allocate an array of
      * meta structures to store info */
     kvtree* partner_hash = kvtree_new();
     kvtree_recv(partner_hash, state->lhs_rank, d->comm);
-    kvtree_set(header, REDSET_KEY_COPY_XOR_PARTNER, partner_hash);
+    kvtree_setf(header, partner_hash, "%d", state->lhs_rank);
 
     /* get permissions for file */
     mode_t mode_file = redset_getmode(1, 1, 0);
@@ -630,7 +630,7 @@ int redset_recover_xor(
   kvtree* header = kvtree_new();
   if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
     /* got our XOR file, see if we have each data file */
-    kvtree* current_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_CURRENT);
+    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       need_rebuild = 1;

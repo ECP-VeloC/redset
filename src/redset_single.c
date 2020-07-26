@@ -90,13 +90,9 @@ int redset_apply_single(
   /* encode file info into hash */
   redset_file_encode_kvtree(current_hash, numfiles, files);
 
-  /* use our global rank for single */
-  int rank;
-  MPI_Comm_rank(comm_world, &rank);
-
   /* copy meta data to hash */
   kvtree* meta_hash = kvtree_new();
-  kvtree_setf(meta_hash, current_hash, "%d", rank);
+  kvtree_setf(meta_hash, current_hash, "%d", d->rank);
 
   /* sort the header to list items alphabetically,
    * this isn't strictly required, but it ensures the kvtrees
@@ -129,12 +125,8 @@ int redset_recover_single(
   /* check whether we have our files */
   kvtree* header = kvtree_new();
   if (redset_read_single_file(name, d, header) == REDSET_SUCCESS) {
-    /* use our global rank for single */
-    int rank;
-    MPI_Comm_rank(comm_world, &rank);
-
     /* get pointer to hash for this rank */
-    kvtree* current_hash = kvtree_getf(header, "%d", rank);
+    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       have_my_files = 0;
