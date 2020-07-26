@@ -1083,33 +1083,12 @@ int redset_apply_rs(
   }
 
   /* allocate buffers to hold reduction result, send buffer, and receive buffer */
-  unsigned char** data_bufs = (unsigned char**) REDSET_MALLOC(state->encoding * sizeof(unsigned char*));
-  unsigned char** recv_bufs = (unsigned char**) REDSET_MALLOC(state->encoding * sizeof(unsigned char*));
-  for (i = 0; i < state->encoding; i++) {
-    /* allocate buffer to hold result of encoding */
-    data_bufs[i] = (unsigned char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (data_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for data buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-
-    /* allocate buffer to read a piece of the recevied chunk file */
-    recv_bufs[i] = (unsigned char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (recv_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-  }
+  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
 
   /* allocate buffer to read a piece of my file */
-  unsigned char* send_buf = (unsigned char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* send_buf = send_bufs[0];
 
   /* allocate space in structures for each file */
   int* fds                 = (int*)           REDSET_MALLOC(num_files * sizeof(int));
@@ -1332,13 +1311,9 @@ int redset_apply_rs(
   redset_free(&status);
 
   /* free buffers */
-  for (i = 0; i < state->encoding; i++) {
-    redset_free(&data_bufs[i]);
-    redset_free(&recv_bufs[i]);
-  }
-  redset_free(&data_bufs);
-  redset_free(&recv_bufs);
-  redset_free(&send_buf);
+  redset_buffers_free(state->encoding, &data_bufs);
+  redset_buffers_free(state->encoding, &recv_bufs);
+  redset_buffers_free(1,               &send_bufs);
 
   /* free the buffers */
   redset_free(&filesizes);
@@ -1696,36 +1671,16 @@ int redset_recover_rs_rebuild(
     );
   }
 
-  /* allocate buffer to compute result of encoding */
-  char** data_bufs = (char**) REDSET_MALLOC(missing * sizeof(char*));
-  for (i = 0; i < missing; i++) {
-    /* allocate buffer to hold result of encoding */
-    data_bufs[i] = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (data_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for data buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-  }
+  /* allocate buffer to compute result of encoding,
+   * we need one for each missing rank */
+  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(missing, redset_mpi_buf_size);
 
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
 
-  /* allocate buffer to read a piece of the recevied chunk file */
-  char** recv_bufs = (char**) REDSET_MALLOC(d->ranks * sizeof(char*));
-  for (i = 0; i < d->ranks; i++) {
-    recv_bufs[i] = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-    if (recv_bufs[i] == NULL) {
-      redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-        redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-  }
+  /* allocate buffer to read a piece of the recevied chunk file,
+   * we might get a message from each rank */
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(d->ranks, redset_mpi_buf_size);
 
   /* this array will map from missing rank number to missing data segment id,
    * which falls in the range [0, d->ranks + state->encoding),
@@ -1793,7 +1748,7 @@ int redset_recover_rs_rebuild(
 
           /* read data from our file */
           if (redset_read_pad_n(num_files, filenames, fds,
-              send_buf, count, offset, filesizes) != REDSET_SUCCESS)
+              send_bufs[0], count, offset, filesizes) != REDSET_SUCCESS)
           {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -1805,7 +1760,7 @@ int redset_recover_rs_rebuild(
             /* seek failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
-          if (redset_read_attempt(chunk_file, fd_chunk, send_buf, count) != count) {
+          if (redset_read_attempt(chunk_file, fd_chunk, send_bufs[0], count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -1813,29 +1768,29 @@ int redset_recover_rs_rebuild(
       } else {
         /* if we're rebuilding, initialize our send buffer with 0,
          * so that our input does not contribute to the result */
-        memset(send_buf, 0, count);
+        memset(send_bufs[0], 0, count);
       }
 
       /* pipelined reduce-scatter across ranks */
       if (step_id > 0) {
         /* exchange data with neighboring ranks */
         MPI_Irecv(recv_bufs[0], count, MPI_BYTE, lhs_rank, 0, d->comm, &request[0]);
-        MPI_Isend(send_buf,     count, MPI_BYTE, rhs_rank, 0, d->comm, &request[1]);
+        MPI_Isend(send_bufs[0], count, MPI_BYTE, rhs_rank, 0, d->comm, &request[1]);
         MPI_Waitall(2, request, status);
       } else {
         /* if we're rebuilding, initialize our send buffer with 0,
          * so that our input does not contribute to the result */
-        memcpy(recv_bufs[0], send_buf, count);
+        memcpy(recv_bufs[0], send_bufs[0], count);
       }
 
       /* merge received blocks via xor operation */
-      reduce_decode(d, state, decode_chunk_id, lhs_rank, missing, rows, count, recv_bufs[0], (unsigned char**)data_bufs);
+      reduce_decode(d, state, decode_chunk_id, lhs_rank, missing, rows, count, recv_bufs[0], data_bufs);
     }
 
     /* at this point, we need to invert our m matrix to solve for unknown values,
      * we invert a copy because we need to do this operation times */
     memcpy(mcopy, m, missing * missing * sizeof(unsigned int));
-    gaussian_solve(state, mcopy, missing, count, (unsigned char**)data_bufs);
+    gaussian_solve(state, mcopy, missing, count, data_bufs);
 
     /* TODO: for large groups, we may want to add some flow control here */
 
@@ -1972,15 +1927,9 @@ int redset_recover_rs_rebuild(
   }
 
   /* free buffers */
-  for (i = 0; i < missing; i++) {
-    redset_free(&data_bufs[i]);
-  }
-  redset_free(&data_bufs);
-  redset_free(&send_buf);
-  for (i = 0; i < d->ranks; i++) {
-    redset_free(&recv_bufs[i]);
-  }
-  redset_free(&recv_bufs);
+  redset_buffers_free(missing,  &data_bufs);
+  redset_buffers_free(1,        &send_bufs);
+  redset_buffers_free(d->ranks, &recv_bufs);
 
   /* free the buffers */
   redset_free(&filesizes);
