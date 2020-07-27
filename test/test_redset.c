@@ -686,16 +686,16 @@ void test_sequence(int copymode, const char* group, int filecount, const char** 
   //redset_create(copymode, MPI_COMM_WORLD, group, &d);
   switch (copymode) {
   case REDSET_COPY_SINGLE:
-    redset_new_single(MPI_COMM_WORLD, group, &d);
+    redset_create_single(MPI_COMM_WORLD, group, &d);
     break;
   case REDSET_COPY_PARTNER:
-    redset_new_partner(MPI_COMM_WORLD, group, 2, &d);
+    redset_create_partner(MPI_COMM_WORLD, group, 2, &d);
     break;
   case REDSET_COPY_XOR:
-    redset_new_xor(MPI_COMM_WORLD, group, 8, &d);
+    redset_create_xor(MPI_COMM_WORLD, group, 8, &d);
     break;
   case REDSET_COPY_RS:
-    redset_new_rs(MPI_COMM_WORLD, group, 8, 2, &d);
+    redset_create_rs(MPI_COMM_WORLD, group, 8, 2, &d);
     break;
   }
 
@@ -726,16 +726,16 @@ void test_sequence(int copymode, const char* group, int filecount, const char** 
     //redset_create(copymode, MPI_COMM_WORLD, group, &d);
     switch (copymode) {
     case REDSET_COPY_SINGLE:
-      redset_new_single(MPI_COMM_WORLD, group, &d);
+      redset_create_single(MPI_COMM_WORLD, group, &d);
       break;
     case REDSET_COPY_PARTNER:
-      redset_new_partner(MPI_COMM_WORLD, group, k, &d);
+      redset_create_partner(MPI_COMM_WORLD, group, k, &d);
       break;
     case REDSET_COPY_XOR:
-      redset_new_xor(MPI_COMM_WORLD, group, 8, &d);
+      redset_create_xor(MPI_COMM_WORLD, group, 8, &d);
       break;
     case REDSET_COPY_RS:
-      redset_new_rs(MPI_COMM_WORLD, group, 8, k, &d);
+      redset_create_rs(MPI_COMM_WORLD, group, 8, k, &d);
       break;
     }
 
