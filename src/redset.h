@@ -54,14 +54,14 @@ int redset_create(
 );
 
 /** create a new redundancy set descriptor for SINGLE encoding */
-int redset_new_single(
+int redset_create_single(
   MPI_Comm comm,     /**< [IN]  - process group participating in set */
   const char* group, /**< [IN]  - string specifying procs in the same failure group */
   redset* d          /**< [OUT] - output redundancy descriptor */
 );
 
 /** create a new redundancy set descriptor for PARTNER encoding */
-int redset_new_partner(
+int redset_create_partner(
   MPI_Comm comm,     /**< [IN]  - process group participating in set */
   const char* group, /**< [IN]  - string specifying procs in the same failure group */
   int replicas,      /**< [IN]  - number of partner replicas */
@@ -69,7 +69,7 @@ int redset_new_partner(
 );
 
 /** create a new redundancy set descriptor for XOR encoding */
-int redset_new_xor(
+int redset_create_xor(
   MPI_Comm comm,     /**< [IN]  - process group participating in set */
   const char* group, /**< [IN]  - string specifying procs in the same failure group */
   int size,          /**< [IN]  - minimum number of ranks for a redundancy set */
@@ -77,7 +77,7 @@ int redset_new_xor(
 );
 
 /** create a new redundancy set descriptor for ReedSolomon encoding */
-int redset_new_rs(
+int redset_create_rs(
   MPI_Comm comm,     /**< [IN]  - process group participating in set */
   const char* group, /**< [IN]  - string specifying procs in the same failure group */
   int size,          /**< [IN]  - minimum number of ranks for a redundancy set */

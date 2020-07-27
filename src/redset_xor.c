@@ -69,7 +69,7 @@ static int redset_read_xor_file(
 
 /* given a redundancy descriptor with all top level fields filled in
  * allocate and fill in structure for xor specific fields in state */
-int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
+int redset_construct_xor(MPI_Comm parent_comm, redset_base* d)
 {
   int rc = REDSET_SUCCESS;
 

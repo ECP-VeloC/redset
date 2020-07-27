@@ -87,18 +87,18 @@ int redset_meta_encode(const char* file, kvtree* meta);
 /* apply file metadata in meta to file */
 int redset_meta_apply(const char* file, const kvtree* meta);
 
-int redset_create_partner(
+int redset_construct_partner(
   MPI_Comm parent_comm,
   redset_base* d,
   int replicas
 );
 
-int redset_create_xor(
+int redset_construct_xor(
   MPI_Comm parent_comm,
   redset_base* d
 );
 
-int redset_create_rs(
+int redset_construct_rs(
   MPI_Comm parent_comm,
   redset_base* d,
   int encoding

@@ -59,7 +59,7 @@ static int redset_read_partner_file(
 
 /* given a redundancy descriptor with all top level fields filled in
  * allocate and fill in structure for partner specific fields in state */
-int redset_create_partner(MPI_Comm parent_comm, redset_base* d, int replicas)
+int redset_construct_partner(MPI_Comm parent_comm, redset_base* d, int replicas)
 {
   int rc = REDSET_SUCCESS;
 

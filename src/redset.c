@@ -431,13 +431,13 @@ static int redset_create_base(
   case REDSET_COPY_SINGLE:
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(comm, d, k);
+    redset_construct_partner(comm, d, k);
     break;
   case REDSET_COPY_XOR:
-    redset_create_xor(comm, d);
+    redset_construct_xor(comm, d);
     break;
   case REDSET_COPY_RS:
-    redset_create_rs(comm, d, k);
+    redset_construct_rs(comm, d, k);
     break;
   }
 
@@ -467,19 +467,19 @@ int redset_create(
 }
 
 /* build a redundancy descriptor for SINGLE encoding */
-int redset_new_single(
+int redset_create_single(
   MPI_Comm comm,
   const char* group_name,
   redset* dvp)
 {
   int set_size = 8;
-  int k = 2;
+  int k = 1;
   int rc = redset_create_base(REDSET_COPY_SINGLE, comm, group_name, set_size, k, dvp);
   return rc;
 }
 
 /* build a redundancy descriptor for PARTNER encoding */
-int redset_new_partner(
+int redset_create_partner(
   MPI_Comm comm,
   const char* group_name,
   int replicas,
@@ -491,7 +491,7 @@ int redset_new_partner(
 }
 
 /* build a redundancy descriptor for XOR encoding */
-int redset_new_xor(
+int redset_create_xor(
   MPI_Comm comm,
   const char* group_name,
   int set_size,
@@ -503,7 +503,7 @@ int redset_new_xor(
 }
 
 /* build a redundancy descriptor for Reed-Solomon encoding */
-int redset_new_rs(
+int redset_create_rs(
   MPI_Comm comm,
   const char* group_name,
   int set_size,
@@ -644,15 +644,15 @@ int redset_restore_from_kvtree(
     break;
   case REDSET_COPY_PARTNER:
     redset_read_from_kvtree_partner(hash, &partner_replicas);
-    redset_create_partner(comm, d, partner_replicas);
+    redset_construct_partner(comm, d, partner_replicas);
     break;
   case REDSET_COPY_XOR:
-    redset_create_xor(comm, d);
+    redset_construct_xor(comm, d);
     break;
   case REDSET_COPY_RS:
     /* read number of encoding blocks from hash to pass to create call */
     redset_read_from_kvtree_rs(hash, &rs_encoding);
-    redset_create_rs(comm, d, rs_encoding);
+    redset_construct_rs(comm, d, rs_encoding);
     break;
   }
 

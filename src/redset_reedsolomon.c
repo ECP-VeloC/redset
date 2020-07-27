@@ -750,7 +750,7 @@ static unsigned int* build_vandermonde(redset_reedsolomon* state, int n, int k)
 
 /* given a redundancy descriptor with all top level fields filled in
  * allocate and fill in structure for Reed-Solomon specific fields in state */
-int redset_create_rs(MPI_Comm parent_comm, redset_base* d, int encoding)
+int redset_construct_rs(MPI_Comm parent_comm, redset_base* d, int encoding)
 {
   int rc = REDSET_SUCCESS;
 
