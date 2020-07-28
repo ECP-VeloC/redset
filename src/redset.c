@@ -1,9 +1,28 @@
+/* to get nsec fields in stat structure */
+#define _GNU_SOURCE
+
+/* TODO: ugly hack until we get a configure test */
+#if defined(__APPLE__)
+#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
+#else
+#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
+#endif
+// HAVE_STRUCT_STAT_ST_MTIME_N
+// HAVE_STRUCT_STAT_ST_UMTIME
+// HAVE_STRUCT_STAT_ST_MTIME_USEC
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 
 #include <limits.h>
 #include <unistd.h>
+
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include "mpi.h"
 
@@ -127,177 +146,6 @@ static int redset_initialize(redset_base* d)
   return REDSET_SUCCESS;
 }
 
-/* given a redundancy descriptor with all top level fields filled in
- * allocate and fill in structure for partner specific fields in state */
-static int redset_create_partner(MPI_Comm parent_comm, redset_base* d)
-{
-  if(parent_comm == MPI_COMM_NULL){
-    redset_err("parent_comm parameter is MPI_COMM_NULL @ %s:%d",
-           __FILE__, __LINE__);
-    return REDSET_FAILURE; 
-  }
-  int rc = REDSET_SUCCESS;
-
-  /* allocate a new structure to hold partner state */
-  redset_partner* state = (redset_partner*) REDSET_MALLOC(sizeof(redset_partner));
-
-  /* attach structure to reddesc */
-  d->state = (void*) state;
-
-  /* record group rank, world rank, and hostname of left and right partners */
-  redset_set_partners(
-    parent_comm, d->comm, 1,
-    &state->lhs_rank, &state->lhs_rank_world, &state->lhs_hostname,
-    &state->rhs_rank, &state->rhs_rank_world, &state->rhs_hostname
-  );
-
-  /* check that we got valid partners */
-  if (state->lhs_hostname == NULL ||
-      state->rhs_hostname == NULL ||
-      strcmp(state->lhs_hostname, "") == 0 ||
-      strcmp(state->rhs_hostname, "") == 0)
-  {
-    /* disable this descriptor */
-    d->enabled = 0;
-    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
-      __FILE__, __LINE__
-    );
-    rc = REDSET_FAILURE;
-  } else {
-    redset_dbg(2, "LHS partner: %s (%d)  -->  My name: %s (%d)  -->  RHS partner: %s (%d)",
-      state->lhs_hostname, state->lhs_rank_world,
-      redset_hostname, redset_rank,
-      state->rhs_hostname, state->rhs_rank_world
-    );
-  }
-
-  return rc;
-}
-
-#define REDSET_KEY_COPY_XOR_RANKS "RANKS"
-#define REDSET_KEY_COPY_XOR_GROUP "GROUP"
-#define REDSET_KEY_COPY_XOR_GROUP_RANK  "RANK"
-#define REDSET_KEY_COPY_XOR_GROUP_RANKS "RANKS"
-
-/* given a redundancy descriptor with all top level fields filled in
- * allocate and fill in structure for xor specific fields in state */
-static int redset_create_xor(MPI_Comm parent_comm, redset_base* d)
-{
-  if(parent_comm == MPI_COMM_NULL){
-    redset_err("parent_comm parameter is MPI_COMM_NULL @ %s:%d",
-           __FILE__, __LINE__);
-    return REDSET_FAILURE; 
-  }
-  int rc = REDSET_SUCCESS;
-
-  /* allocate a new structure to hold XOR state */
-  redset_xor* state = (redset_xor*) REDSET_MALLOC(sizeof(redset_xor));
-
-  /* attach structure to reddesc */
-  d->state = (void*) state;
-
-  /* allocate a new hash to store group mapping info */
-  kvtree* header = kvtree_new();
-
-  /* record the total number of ranks in parent comm */
-  int parent_ranks;
-  MPI_Comm_size(parent_comm, &parent_ranks);
-  kvtree_set_kv_int(header, REDSET_KEY_COPY_XOR_RANKS, parent_ranks);
-
-  /* create a new empty hash to track group info for this xor set */
-  kvtree* hash = kvtree_new();
-  kvtree_set(header, REDSET_KEY_COPY_XOR_GROUP, hash);
-
-  /* record the total number of ranks in the xor communicator */
-  int ranks_comm;
-  MPI_Comm_size(d->comm, &ranks_comm);
-  kvtree_set_kv_int(hash, REDSET_KEY_COPY_XOR_GROUP_RANKS, ranks_comm);
-
-  /* record mapping of rank in xor group to corresponding parent rank */
-  if (ranks_comm > 0) {
-    /* allocate array to receive rank from each process */
-    int* ranklist = (int*) REDSET_MALLOC(ranks_comm * sizeof(int));
-
-    /* gather rank values */
-    int parent_rank;
-    MPI_Comm_rank(parent_comm, &parent_rank);
-    MPI_Allgather(&parent_rank, 1, MPI_INT, ranklist, 1, MPI_INT, d->comm);
-
-    /* map ranks in comm to ranks in comm */
-    int i;
-    for (i=0; i < ranks_comm; i++) {
-      int rank = ranklist[i];
-      kvtree_setf(hash, NULL, "%s %d %d", REDSET_KEY_COPY_XOR_GROUP_RANK, i, rank);
-    }
-
-    /* free the temporary array */
-    redset_free(&ranklist);
-  }
-
-  /* record group mapping info in descriptor */
-  state->group_map = header; 
-
-  /* record group rank, world rank, and hostname of left and right partners */
-  redset_set_partners(
-    parent_comm, d->comm, 1,
-    &state->lhs_rank, &state->lhs_rank_world, &state->lhs_hostname,
-    &state->rhs_rank, &state->rhs_rank_world, &state->rhs_hostname
-  );
-
-  /* check that we got valid partners */
-  if (state->lhs_hostname == NULL ||
-      state->rhs_hostname == NULL ||
-      strcmp(state->lhs_hostname, "") == 0 ||
-      strcmp(state->rhs_hostname, "") == 0)
-  {
-    /* disable this descriptor */
-    d->enabled = 0;
-    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
-      __FILE__, __LINE__
-    );
-    rc = REDSET_FAILURE;
-  } else {
-    redset_dbg(2, "LHS partner: %s (%d)  -->  My name: %s (%d)  -->  RHS partner: %s (%d)",
-      state->lhs_hostname, state->lhs_rank_world,
-      redset_hostname, redset_rank,
-      state->rhs_hostname, state->rhs_rank_world
-    );
-  }
-
-  return rc;
-}
-
-static int redset_delete_partner(redset_base* d)
-{
-  redset_partner* state = (redset_partner*) d->state;
-  if (state != NULL) {
-    /* free strings that we received */
-    redset_free(&state->lhs_hostname);
-    redset_free(&state->rhs_hostname);
-
-    /* free the structure */
-    redset_free(&d->state);
-  }
-  return REDSET_SUCCESS;
-}
-
-static int redset_delete_xor(redset_base* d)
-{
-  redset_xor* state = (redset_xor*) d->state;
-  if (state != NULL) {
-    /* free the hash mapping group ranks to world ranks */
-    kvtree_delete(&state->group_map);
-
-    /* free strings that we received */
-    redset_free(&state->lhs_hostname);
-    redset_free(&state->rhs_hostname);
-
-    /* free the structure */
-    redset_free(&d->state);
-  }
-  return REDSET_SUCCESS;
-}
-
 /* free any memory associated with the specified redundancy
  * descriptor */
 int redset_delete(redset* dvp)
@@ -314,6 +162,9 @@ int redset_delete(redset* dvp)
     break;
   case REDSET_COPY_XOR:
     redset_delete_xor(d);
+    break;
+  case REDSET_COPY_RS:
+    redset_delete_rs(d);
     break;
   }
 
@@ -370,6 +221,9 @@ int redset_to_kvtree(const redset_base* d, kvtree* hash)
     break;
   case REDSET_COPY_XOR:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "XOR");
+    break;
+  case REDSET_COPY_RS:
+    kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "RS");
     break;
   }
 
@@ -457,7 +311,7 @@ static int redset_split_across(
   /* Split procs in parent into groups containing all procs with same
    * rank within group, order by rank in parent */
   MPI_Comm_split(comm_parent, rank_group, rank_parent, comm_across);
-  
+
   return REDSET_SUCCESS;
 }
 
@@ -466,13 +320,15 @@ static int redset_type_int_from_str(const char* value, int* outtype)
 {
   int rc = REDSET_SUCCESS;
 
-  int type;
+  int type = REDSET_COPY_NULL;
   if (strcasecmp(value, "SINGLE") == 0) {
     type = REDSET_COPY_SINGLE;
   } else if (strcasecmp(value, "PARTNER") == 0) {
     type = REDSET_COPY_PARTNER;
   } else if (strcasecmp(value, "XOR") == 0) {
     type = REDSET_COPY_XOR;
+  } else if (strcasecmp(value, "RS") == 0) {
+    type = REDSET_COPY_RS;
   } else {
     if (redset_rank == 0) {
       redset_warn("Unknown copy type %s @ %s:%d",
@@ -488,10 +344,12 @@ static int redset_type_int_from_str(const char* value, int* outtype)
 
 /* build a redundancy descriptor corresponding to the specified hash,
  * this function is collective */
-int redset_create(
+static int redset_create_base(
   int type,
   MPI_Comm comm,
   const char* group_name,
+  int set_size,
+  int k,
   redset* dvp)
 {
   if(group_name == NULL){
@@ -510,13 +368,8 @@ int redset_create(
   /* set caller's pointer to record address of redset structure */
   *dvp = (void*) d;
 
-  int SET_SIZE = 8;
-
   /* initialize the descriptor */
   redset_initialize(d);
-
-  /* set xor set size */
-  int set_size = SET_SIZE;
 
   /* assume it's enabled, we may turn this bit off later */
   d->enabled = 1;
@@ -527,11 +380,12 @@ int redset_create(
   /* dup the parent communicator */
   MPI_Comm_dup(comm, &d->parent_comm);
 
-  /* split procs from comm into sub communicators based on group_name */
-  MPI_Comm newcomm;
-  rankstr_mpi_comm_split(d->parent_comm, group_name, 0, 0, 1, &newcomm);
+  /* split procs from comm into sub communicators based on group_name,
+   * this puts all procs with the same group_name into the same subcomm */
+  MPI_Comm comm_fail;
+  rankstr_mpi_comm_split(d->parent_comm, group_name, 0, 0, 1, &comm_fail);
 
-  /* build the communicator based on the copy type
+  /* build our redundancy communicator based on the copy type
    * and other parameters */
   MPI_Comm comm_across;
   int rank_across, ranks_across, split_id;
@@ -542,13 +396,15 @@ int redset_create(
     break;
   case REDSET_COPY_PARTNER:
     /* dup the communicator across failure groups */
-    redset_split_across(comm, newcomm, &d->comm);
+    redset_split_across(comm, comm_fail, &d->comm);
     break;
   case REDSET_COPY_XOR:
-    /* split the communicator across nodes based on xor set size
-     * to create our xor communicator */
+  case REDSET_COPY_RS:
+    /* split the communicator across groups based on set size
+     * to create our redundancy group communicator */
+
     /* split comm world across failure groups */
-    redset_split_across(comm, newcomm, &comm_across);
+    redset_split_across(comm, comm_fail, &comm_across);
 
     /* get our rank and the number of ranks in this communicator */
     MPI_Comm_rank(comm_across, &rank_across);
@@ -577,25 +433,95 @@ int redset_create(
   MPI_Bcast(&d->group_id, 1, MPI_INT, 0, d->comm);
 
   /* count the number of groups */
-  int group_master = (d->rank == 0) ? 1 : 0;
-  MPI_Allreduce(&group_master, &d->groups, 1, MPI_INT, MPI_SUM, comm);
+  int group_leader = (d->rank == 0) ? 1 : 0;
+  MPI_Allreduce(&group_leader, &d->groups, 1, MPI_INT, MPI_SUM, comm);
 
   /* fill in state struct depending on copy type */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(comm, d);
+    redset_construct_partner(comm, d, k);
     break;
   case REDSET_COPY_XOR:
-    redset_create_xor(comm, d);
+    redset_construct_xor(comm, d);
+    break;
+  case REDSET_COPY_RS:
+    redset_construct_rs(comm, d, k);
     break;
   }
 
   /* free communicator of all procs in the same group */
-  MPI_Comm_free(&newcomm);
+  MPI_Comm_free(&comm_fail);
 
   return REDSET_SUCCESS;
+}
+
+/* build a redundancy descriptor corresponding to the specified hash,
+ * this function is collective */
+int redset_create(
+  int type,
+  MPI_Comm comm,
+  const char* group_name,
+  redset* dvp)
+{
+  int set_size = 8;
+
+  int k = 1;
+  if (type == REDSET_COPY_RS) {
+    k = 2;
+  }
+
+  int rc = redset_create_base(type, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for SINGLE encoding */
+int redset_create_single(
+  MPI_Comm comm,
+  const char* group_name,
+  redset* dvp)
+{
+  int set_size = 8;
+  int k = 1;
+  int rc = redset_create_base(REDSET_COPY_SINGLE, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for PARTNER encoding */
+int redset_create_partner(
+  MPI_Comm comm,
+  const char* group_name,
+  int replicas,
+  redset* dvp)
+{
+  int set_size = 8;
+  int rc = redset_create_base(REDSET_COPY_PARTNER, comm, group_name, set_size, replicas, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for XOR encoding */
+int redset_create_xor(
+  MPI_Comm comm,
+  const char* group_name,
+  int set_size,
+  redset* dvp)
+{
+  int k = 1;
+  int rc = redset_create_base(REDSET_COPY_XOR, comm, group_name, set_size, k, dvp);
+  return rc;
+}
+
+/* build a redundancy descriptor for Reed-Solomon encoding */
+int redset_create_rs(
+  MPI_Comm comm,
+  const char* group_name,
+  int set_size,
+  int k,
+  redset* dvp)
+{
+  int rc = redset_create_base(REDSET_COPY_RS, comm, group_name, set_size, k, dvp);
+  return rc;
 }
 
 /* convert the specified redundancy descritpor into a corresponding
@@ -621,9 +547,14 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
     break;
   case REDSET_COPY_PARTNER:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "PARTNER");
+    redset_store_to_kvtree_partner(d, hash);
     break;
   case REDSET_COPY_XOR:
     kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "XOR");
+    break;
+  case REDSET_COPY_RS:
+    kvtree_set_kv(hash, REDSET_KEY_CONFIG_TYPE, "RS");
+    redset_store_to_kvtree_rs(d, hash);
     break;
   }
 
@@ -643,19 +574,11 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
   return REDSET_SUCCESS;
 }
 
-/* build a redundancy descriptor corresponding to the specified kvtree,
- * this function is collective, it is the opposite of store_to_kvtree */
-int redset_restore_from_kvtree(
+/* read values from hash and fill in corresponding descriptor fields */
+static int redset_read_from_kvtree(
   const kvtree* hash,
   redset_base* d)
 {
-  /* it's required that the caller has already initialized the descriptor
-   * and dupped the parent comm before calling this function, if we expose
-   * this function to the user we should revisit this interface */
-  // redset_initialize(d);
-  // MPI_Comm_dup(comm, &d->parent_comm);
-  MPI_Comm comm = d->parent_comm;
-
   /* enable / disable the descriptor */
   d->enabled = 1;
   kvtree_util_get_int(hash, REDSET_KEY_CONFIG_ENABLED, &(d->enabled));
@@ -699,17 +622,47 @@ int redset_restore_from_kvtree(
       __FILE__, __LINE__
     );
   }
+
+  return REDSET_SUCCESS;
+}
+
+/* build a redundancy descriptor corresponding to the specified kvtree,
+ * this function is collective, it is the opposite of store_to_kvtree */
+int redset_restore_from_kvtree(
+  const kvtree* hash,
+  redset_base* d)
+{
+  /* it's required that the caller has already initialized the descriptor
+   * and dup'ed the parent comm before calling this function, if we expose
+   * this function to the user we should revisit this interface */
+  // redset_initialize(d);
+
+  /* fill in fields from hash (no MPI allowed) */
+  redset_read_from_kvtree(hash, d);
+
+  // MPI_Comm_dup(comm, &d->parent_comm);
+  MPI_Comm comm = d->parent_comm;
+
+  /* build the group communicator */
   MPI_Comm_split(comm, d->group_id, d->rank, &d->comm);
 
   /* fill in state struct depending on copy type */
+  int partner_replicas = 0;
+  int rs_encoding = 0;
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     break;
   case REDSET_COPY_PARTNER:
-    redset_create_partner(comm, d);
+    redset_read_from_kvtree_partner(hash, &partner_replicas);
+    redset_construct_partner(comm, d, partner_replicas);
     break;
   case REDSET_COPY_XOR:
-    redset_create_xor(comm, d);
+    redset_construct_xor(comm, d);
+    break;
+  case REDSET_COPY_RS:
+    /* read number of encoding blocks from hash to pass to create call */
+    redset_read_from_kvtree_rs(hash, &rs_encoding);
+    redset_construct_rs(comm, d, rs_encoding);
     break;
   }
 
@@ -790,6 +743,190 @@ int redset_bool_have_files(
   return 1;
 }
 
+static void redset_stat_get_atimes(const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_atime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_atime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uatime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_atime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_mtimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_mtime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_mtime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_umtime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_mtime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_ctimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_ctime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_ctime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uctime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_ctime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+int redset_meta_encode(const char* file, kvtree* meta)
+{
+  struct stat statbuf;
+  int rc = redset_stat(file, &statbuf);
+  if (rc == 0) {
+    kvtree_util_set_unsigned_long(meta, "MODE", (unsigned long) statbuf.st_mode);
+    kvtree_util_set_unsigned_long(meta, "UID",  (unsigned long) statbuf.st_uid);
+    kvtree_util_set_unsigned_long(meta, "GID",  (unsigned long) statbuf.st_gid);
+    kvtree_util_set_unsigned_long(meta, "SIZE", (unsigned long) statbuf.st_size);
+
+    uint64_t secs, nsecs;
+    redset_stat_get_atimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_ctimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_mtimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_NSECS", (unsigned long) nsecs);
+
+    return REDSET_SUCCESS;
+  }
+  return REDSET_FAILURE;
+}
+
+int redset_meta_apply(const char* file, const kvtree* meta)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* set permission bits on file */
+  unsigned long mode_val;
+  if (kvtree_util_get_unsigned_long(meta, "MODE", &mode_val) == KVTREE_SUCCESS) {
+    mode_t mode = (mode_t) mode_val;
+
+    /* TODO: mask some bits here */
+
+    int chmod_rc = chmod(file, mode);
+    if (chmod_rc != 0) {
+      /* failed to set permissions */
+      redset_err("chmod(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set uid and gid on file */
+  unsigned long uid_val = -1;
+  unsigned long gid_val = -1;
+  kvtree_util_get_unsigned_long(meta, "UID", &uid_val);
+  kvtree_util_get_unsigned_long(meta, "GID", &gid_val);
+  if (uid_val != -1 || gid_val != -1) {
+    /* got a uid or gid value, try to set them */
+    int chown_rc = chown(file, (uid_t) uid_val, (gid_t) gid_val);
+    if (chown_rc != 0) {
+      /* failed to set uid and gid */
+      redset_err("chown(%s, %lu, %lu) failed: errno=%d %s @ %s:%d",
+        file, uid_val, gid_val, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* can't set the size at this point, but we can check it */
+  unsigned long size;
+  if (kvtree_util_get_unsigned_long(meta, "SIZE", &size) == KVTREE_SUCCESS) {
+    /* got a size field in the metadata, stat the file */
+    struct stat statbuf;
+    int stat_rc = redset_stat(file, &statbuf);
+    if (stat_rc == 0) {
+      /* stat succeeded, check that sizes match */
+      if (size != statbuf.st_size) {
+        /* file size is not correct */
+        redset_err("file `%s' size is %lu expected %lu @ %s:%d",
+          file, (unsigned long) statbuf.st_size, size, __FILE__, __LINE__
+        );
+        rc = REDSET_FAILURE;
+      }
+    } else {
+      /* failed to stat file */
+      redset_err("stat(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set timestamps on file as last step */
+  unsigned long atime_secs  = 0;
+  unsigned long atime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "ATIME_SECS",  &atime_secs);
+  kvtree_util_get_unsigned_long(meta, "ATIME_NSECS", &atime_nsecs);
+
+  unsigned long mtime_secs  = 0;
+  unsigned long mtime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "MTIME_SECS",  &mtime_secs);
+  kvtree_util_get_unsigned_long(meta, "MTIME_NSECS", &mtime_nsecs);
+
+  if (atime_secs != 0 || atime_nsecs != 0 ||
+      mtime_secs != 0 || mtime_nsecs != 0)
+  {
+    /* fill in time structures */
+    struct timespec times[2];
+    times[0].tv_sec  = (time_t) atime_secs;
+    times[0].tv_nsec = (long)   atime_nsecs;
+    times[1].tv_sec  = (time_t) mtime_secs;
+    times[1].tv_nsec = (long)   mtime_nsecs;
+
+    /* set times with nanosecond precision using utimensat,
+     * assume path is relative to current working directory,
+     * if it's not absolute, and set times on link (not target file)
+     * if dest_path refers to a link */
+    int utime_rc = utimensat(AT_FDCWD, file, times, AT_SYMLINK_NOFOLLOW);
+    if (utime_rc != 0) {
+      redset_err("Failed to change timestamps on `%s' utimensat() errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  return rc;
+}
+
 static int redset_build_filename(
   const char* name,
   char* file,
@@ -815,13 +952,16 @@ static int redset_encode_reddesc(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
+
   kvtree_set(current_hash, "DESC", desc_hash);
 
   /* copy meta data to hash */
   kvtree* meta_hash = kvtree_new();
   kvtree_setf(meta_hash, current_hash, "%d", rank_world);
 
-  /* apply redundancy to hash data according to selected scheme */
+  /* apply redundancy to hash data according to selected scheme,
+   * we need this hash to be recoverable to the same degree that
+   * the redundancy scheme protects data */
   int rc = REDSET_FAILURE;
   switch (d->type) {
   case REDSET_COPY_SINGLE:
@@ -833,7 +973,16 @@ static int redset_encode_reddesc(
   case REDSET_COPY_XOR:
     rc = redset_encode_reddesc_xor(meta_hash, name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_encode_reddesc_rs(meta_hash, name, d);
+    break;
   }
+
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(meta_hash);
 
   /* write meta data to file */
   char filename[REDSET_MAX_FILENAME];
@@ -911,6 +1060,15 @@ static int redset_recover_reddesc(
   /* check that everyone can get their descriptor */
   int num_desc = kvtree_size(recv_hash);
   if (! redset_alltrue((num_desc > 0), comm_world)) {
+    /* we can't fully recover the reddesc,
+     * but if this process has its reddesc,
+     * extract the fields so that unapply cleans up */
+    if (num_desc > 0) {
+      kvtree_elem* desc_elem = kvtree_elem_first(recv_hash);
+      kvtree* desc_hash = kvtree_elem_hash(desc_elem);
+      redset_read_from_kvtree(desc_hash, d);
+    }
+
     kvtree_delete(&recv_hash);
     kvtree_delete(&send_hash);
     redset_dbg(2, "Cannot find process that has my redundancy descriptor @ %s:%d",
@@ -991,11 +1149,11 @@ int redset_apply(
 
   /* determine whether all processes saved their redundancy info */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its redundancy information */
+    /* at least one process failed to encode its redundancy information */
     return REDSET_FAILURE;
   }
 
-  /* apply the redundancy scheme */
+  /* apply the redundancy scheme to data files */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     rc = redset_apply_single(numfiles, files, name, d);
@@ -1005,6 +1163,9 @@ int redset_apply(
     break;
   case REDSET_COPY_XOR:
     rc = redset_apply_xor(numfiles, files, name, d);
+    break;
+  case REDSET_COPY_RS:
+    rc = redset_apply_rs(numfiles, files, name, d);
     break;
   }
 
@@ -1077,6 +1238,9 @@ int redset_recover(
   case REDSET_COPY_XOR:
     rc = redset_recover_xor(name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_recover_rs(name, d);
+    break;
   }
 
   /* determine whether everyone succeeded */
@@ -1094,14 +1258,14 @@ int redset_unapply(
   const char* name,
   const redset dvp)
 {
-  int rc;
+  int rc = REDSET_SUCCESS;
 
   /* get pointer to redset structure */
   redset_base* d = (redset_base*) dvp;
 
   MPI_Comm comm_world = d->parent_comm;
 
-  /* now recover data using redundancy scheme, if necessary */
+  /* now remove redset encoding data depending on type, if necessary */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
     rc = redset_unapply_single(name, d);
@@ -1112,20 +1276,23 @@ int redset_unapply(
   case REDSET_COPY_XOR:
     rc = redset_unapply_xor(name, d);
     break;
+  case REDSET_COPY_RS:
+    rc = redset_unapply_rs(name, d);
+    break;
   }
 
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its data */
+    /* at least one process failed to clean up */
     return REDSET_FAILURE;
   }
 
-  /* reapply encoding to redundancy descriptor */
+  /* remove files encoding the redundancy scheme */
   rc = redset_unencode_reddesc(name, d);
 
   /* determine whether everyone succeeded */
   if (! redset_alltrue((rc == REDSET_SUCCESS), comm_world)) {
-    /* at least one process failed to rebuild its redundancy information */
+    /* at least one process failed to clean up */
     return REDSET_FAILURE;
   }
 
@@ -1134,7 +1301,7 @@ int redset_unapply(
 
 static int redset_from_dir(
   MPI_Comm comm_world,
-  const char* name, 
+  const char* name,
   redset_base* d)
 {
   /* get name of this process */
@@ -1187,6 +1354,9 @@ redset_filelist redset_filelist_get(
     break;
   case REDSET_COPY_XOR:
     tmp = redset_filelist_get_xor(name, d);
+    break;
+  case REDSET_COPY_RS:
+    tmp = redset_filelist_get_rs(name, d);
     break;
   }
 

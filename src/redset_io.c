@@ -517,6 +517,19 @@ int redset_write_pad_n(int n, const char** files, int* fds,
   return REDSET_SUCCESS;
 }
 
+
+/* given a filename, return stat info */
+int redset_stat(const char* file, struct stat* statbuf)
+{
+  int rc = stat(file, statbuf);
+  if (rc < 0) {
+    redset_err("Failed to stat file %s: errno=%d %s @ %s:%d",
+      file, errno, strerror(errno), __FILE__, __LINE__
+    );
+  }
+  return rc;
+}
+
 /* given a filename, return number of bytes in file */
 unsigned long redset_file_size(const char* file)
 {
@@ -585,10 +598,14 @@ int redset_file_is_writeable(const char* file)
 int redset_file_unlink(const char* file)
 {
   if (unlink(file) != 0) {
-    redset_dbg(2, "Failed to delete file: %s errno=%d %s @ %s:%d",
-      file, errno, strerror(errno), __FILE__, __LINE__
-    );
-    return REDSET_FAILURE;
+    /* hit an error deleting, but don't care if we failed
+     * because there is no file at that path */
+    if (errno != ENOENT) {
+      redset_dbg(2, "Failed to delete file: %s errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      return REDSET_FAILURE;
+    }
   }
   return REDSET_SUCCESS;
 }
@@ -648,6 +665,15 @@ Directory functions
 /* recursively create directory and subdirectories */
 int redset_mkdir(const char* dir, mode_t mode)
 {
+  /* consider it a success if we either create the directory
+   * or we fail because it already exists */
+  int tmp_rc = mkdir(dir, mode);
+  if (tmp_rc == 0 || errno == EEXIST) {
+    return REDSET_SUCCESS;
+  }
+
+  /* failed to create the directory,
+   * we'll check the parent dir and try again */
   int rc = REDSET_SUCCESS;
 
   /* With dirname, either the original string may be modified or the function may return a
@@ -669,7 +695,7 @@ int redset_mkdir(const char* dir, mode_t mode)
 
   /* if we can write to path, try to create subdir within path */
   if (access(path, W_OK) == 0 && rc == REDSET_SUCCESS) {
-    int tmp_rc = mkdir(dir, mode);
+    tmp_rc = mkdir(dir, mode);
     if (tmp_rc < 0) {
       if (errno == EEXIST) {
         /* don't complain about mkdir for a directory that already exists */

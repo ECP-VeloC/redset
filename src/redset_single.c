@@ -30,7 +30,7 @@
  * are checked against the specified files.
  */
 
-/* set partner filename */
+/* set single filename */
 static void redset_build_single_filename(
   const char* name,
   const redset_base* d,
@@ -38,6 +38,32 @@ static void redset_build_single_filename(
   size_t len)
 {
   snprintf(file, len, "%s.single.redset", name);
+}
+
+/* returns 1 if we successfully read redundancy file, 0 otherwise */
+static int redset_read_single_file(
+  const char* name,
+  const redset_base* d,
+  kvtree* header)
+{
+  /* get single filename */
+  char file[REDSET_MAX_FILENAME];
+  redset_build_single_filename(name, d, file, sizeof(file));
+
+  /* check that we can read the file */
+  if (redset_file_is_readable(file) != REDSET_SUCCESS) {
+    redset_dbg(2, "Do not have read access to file: %s @ %s:%d",
+      file, __FILE__, __LINE__
+    );
+    return REDSET_FAILURE;
+  }
+
+  /* read header from file */
+  if (kvtree_read_file(file, header) != KVTREE_SUCCESS) {
+    return REDSET_FAILURE;
+  }
+
+  return REDSET_SUCCESS;
 }
 
 int redset_encode_reddesc_single(
@@ -58,45 +84,21 @@ int redset_apply_single(
   int i;
   MPI_Comm comm_world = d->parent_comm;
 
-  /* get name of this process */
-  int rank_world;
-  MPI_Comm_rank(comm_world, &rank_world);
-
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
 
-  /* record total number of files we have */
-  kvtree_set_kv_int(current_hash, "FILES", numfiles);
-
-  /* step through each of my files for the specified dataset
-   * to scan for any incomplete files */
-  /* enter index, name, and size of each file */
-  double my_bytes = 0.0;
-  kvtree* files_hash = kvtree_set(current_hash, "FILE", kvtree_new());
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    const char* file_name = files[i];
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* add up the number of bytes on our way through */
-    my_bytes += (double) file_size;
-
-    /* add entry for this file, including its index and name */
-    kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
-
-    /* record file size */
-    kvtree_util_set_bytecount(file_hash, "SIZE", file_size);
-
-    /* TODO: record file permissions, timestamps */
-
-    /* TODO: compute and store CRC values */
-  }
+  /* encode file info into hash */
+  redset_file_encode_kvtree(current_hash, numfiles, files);
 
   /* copy meta data to hash */
   kvtree* meta_hash = kvtree_new();
-  kvtree_setf(meta_hash, current_hash, "%d", rank_world);
+  kvtree_setf(meta_hash, current_hash, "%d", d->rank);
+
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(meta_hash);
 
   /* write meta data to file in directory */
   char filename[REDSET_MAX_FILENAME];
@@ -113,87 +115,30 @@ int redset_recover_single(
   const char* name,
   const redset_base* d)
 {
-  int i;
   int rc = REDSET_SUCCESS;
 
   MPI_Comm comm_world = d->parent_comm;
 
-  /* get name of this process (use rank in COMM_WORLD for now) */
-  int rank_world;
-  MPI_Comm_rank(comm_world, &rank_world);
-
   /* assume files exist for this process */
-  int valid = 1;
+  int have_my_files = 1;
 
-  /* read meta data from file in directory */
-  kvtree* meta_hash = kvtree_new();
-  char filename[REDSET_MAX_FILENAME];
-  redset_build_single_filename(name, d, filename, sizeof(filename));
-  kvtree_read_file(filename, meta_hash);
-
-  /* get pointer to hash for this rank */
-  kvtree* current_hash = kvtree_getf(meta_hash, "%d", rank_world);
-  if (current_hash == NULL) {
-    valid = 0;
-  }
-
-  /* read total number of files we have */
-  int numfiles_saved = -1;
-  if (kvtree_util_get_int(current_hash, "FILES", &numfiles_saved) == KVTREE_SUCCESS) {
-//  if (numfiles != numfiles_saved) {
-//    valid = 0;
-//  }
+  /* check whether we have our files */
+  kvtree* header = kvtree_new();
+  if (redset_read_single_file(name, d, header) == REDSET_SUCCESS) {
+    /* get pointer to hash for this rank */
+    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+      /* some data file is bad */
+      have_my_files = 0;
+    }
   } else {
-    /* number of files not recorded */
-    valid = 0;
+    /* failed to read redundancy file */
+    have_my_files = 0;
   }
-
-  /* verify that we have each file and that the size is correct for each one */
-  kvtree* files_hash = kvtree_get(current_hash, "FILE");
-  for (i = 0; i < numfiles_saved; i++) {
-    /* get file name of this file */
-    kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-    kvtree_elem* elem = kvtree_elem_first(index_hash);
-    const char* file_name = kvtree_elem_key(elem);
-
-    /* lookup hash for this file */
-    kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-    if (file_hash == NULL) {
-      /* failed to find file name recorded */
-      valid = 0;
-      continue;
-    }
-
-    /* check that file exists */
-    if (redset_file_exists(file_name) != REDSET_SUCCESS) {
-      /* failed to find file */
-      valid = 0;
-      continue;
-    }
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* lookup expected file size and compare to actual size */
-    unsigned long file_size_saved;
-    if (kvtree_util_get_bytecount(file_hash, "SIZE", &file_size_saved) == KVTREE_SUCCESS) {
-      if (file_size != file_size_saved) {
-        /* file size does not match */
-        valid = 0;
-        continue;
-      }
-    } else {
-      /* file size not recorded */
-      valid = 0;
-      continue;
-    }
-  }
-
-  /* delete the hash */
-  kvtree_delete(&meta_hash);
+  kvtree_delete(&header);
 
   /* determine whether all ranks have their files */
-  if (! redset_alltrue(valid, comm_world)) {
+  if (! redset_alltrue(have_my_files, comm_world)) {
     rc = REDSET_FAILURE;
   }
 

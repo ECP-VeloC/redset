@@ -46,15 +46,122 @@ static int redset_read_partner_file(
     redset_dbg(2, "Do not have read access to file: %s @ %s:%d",
       file, __FILE__, __LINE__
     );
-    return 0;
+    return REDSET_FAILURE;
   }
 
   /* read partner header from file */
   if (kvtree_read_file(file, header) != KVTREE_SUCCESS) {
-    return 0;
+    return REDSET_FAILURE;
   }
 
-  return 1;
+  return REDSET_SUCCESS;
+}
+
+/* given a redundancy descriptor with all top level fields filled in
+ * allocate and fill in structure for partner specific fields in state */
+int redset_construct_partner(MPI_Comm parent_comm, redset_base* d, int replicas)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* allocate a new structure to hold partner state */
+  redset_partner* state = (redset_partner*) REDSET_MALLOC(sizeof(redset_partner));
+
+  /* attach structure to reddesc */
+  d->state = (void*) state;
+
+  /* record group rank, world rank, and hostname of left and right partners */
+  redset_set_partners(
+    parent_comm, d->comm, 1,
+    &state->lhs_rank, &state->lhs_rank_world, &state->lhs_hostname,
+    &state->rhs_rank, &state->rhs_rank_world, &state->rhs_hostname
+  );
+
+  /* check that we got valid partners */
+  if (state->lhs_hostname == NULL ||
+      state->rhs_hostname == NULL ||
+      strcmp(state->lhs_hostname, "") == 0 ||
+      strcmp(state->rhs_hostname, "") == 0)
+  {
+    /* disable this descriptor */
+    d->enabled = 0;
+    redset_warn("Failed to find partner processes for redundancy descriptor, disabling @ %s:%d",
+      __FILE__, __LINE__
+    );
+    rc = REDSET_FAILURE;
+  } else {
+    redset_dbg(2, "LHS partner: %s (%d)  -->  My name: %s (%d)  -->  RHS partner: %s (%d)",
+      state->lhs_hostname, state->lhs_rank_world,
+      redset_hostname, redset_rank,
+      state->rhs_hostname, state->rhs_rank_world
+    );
+  }
+
+  /* record number of replicas */
+  state->replicas = replicas;
+
+  /* verify that all groups have a sufficient number of procs,
+   * for the requested number of encoding blocks, number of
+   * encoding blocks has to be less than number of procs in
+   * each redundancy set */
+  int valid = 1;
+  if (replicas < 1 || replicas >= d->ranks) {
+    valid = 0;
+  }
+  if (! redset_alltrue(valid, parent_comm)) {
+    if (! valid) {
+      redset_abort(-1, "Number of partner replicas (%d) must be in range [1,%d) with %d ranks in set @ %s:%d",
+        replicas, d->ranks, d->ranks, __FILE__, __LINE__
+      );
+    }
+  }
+
+  return rc;
+}
+
+int redset_delete_partner(redset_base* d)
+{
+  redset_partner* state = (redset_partner*) d->state;
+  if (state != NULL) {
+    /* free strings that we received */
+    redset_free(&state->lhs_hostname);
+    redset_free(&state->rhs_hostname);
+
+    /* free the structure */
+    redset_free(&d->state);
+  }
+  return REDSET_SUCCESS;
+}
+
+/* copy our redundancy descriptor info to a partner */
+int redset_store_to_kvtree_partner(
+  const redset_base* d,
+  kvtree* hash)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* get pointer to partner state structure */
+  redset_partner* state = (redset_partner*) d->state;
+
+  /* record number of replicas */
+  kvtree_util_set_int(hash, "REPLICAS", state->replicas);
+
+  return rc;
+}
+
+/* this extracts parameters from the hash that are needed
+ * in order to call create_partner */
+int redset_read_from_kvtree_partner(
+  const kvtree* hash,
+  int* outreplicas)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* get number of replicas from hash */
+  if (kvtree_util_get_int(hash, "REPLICAS", outreplicas) != KVTREE_SUCCESS) {
+    rc = REDSET_FAILURE;
+  }
+
+  return rc;
 }
 
 /* copy our redundancy descriptor info to a partner */
@@ -68,13 +175,29 @@ int redset_encode_reddesc_partner(
   /* get pointer to partner state structure */
   redset_partner* state = (redset_partner*) d->state;
 
-  /* exchange our redundancy descriptor hash with our partners */
-  kvtree* partner_hash = kvtree_new();
-  kvtree_sendrecv(hash, state->rhs_rank, partner_hash, state->lhs_rank, d->comm);
-   
-  /* store partner hash in our under its name */
-  kvtree_merge(hash, partner_hash);
-  kvtree_delete(&partner_hash);
+  /* make a copy of the hash we want to encode */
+  kvtree* send_hash = kvtree_new();
+  kvtree_merge(send_hash, hash);
+
+  /* we copy this hash to match the number of encoding blocks */
+  int i;
+  for (i = 1; i <= state->replicas; i++) {
+    /* get ranks of procs to our left and right sides */
+    int lhs_rank = (d->rank - i + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + i + d->ranks) % d->ranks;
+
+    /* send our redundancy descriptor hash to the right,
+     * receive incoming hash from left neighbors */
+    kvtree* partner_hash = kvtree_new();
+    kvtree_sendrecv(send_hash, rhs_rank, partner_hash, lhs_rank, d->comm);
+
+    /* store partner hash in our under its name */
+    kvtree_merge(hash, partner_hash);
+    kvtree_delete(&partner_hash);
+  }
+
+  /* delete our copy */
+  kvtree_delete(&send_hash);
 
   return rc;
 }
@@ -97,45 +220,15 @@ int redset_apply_partner(
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
 
-  /* record total number of files we have */
-  kvtree_set_kv_int(current_hash, "FILES", numfiles);
+  /* record info about our data files */
+  redset_file_encode_kvtree(current_hash, numfiles, files);
 
-  /* allocate arrays to hold file descriptors, filenames, and filesizes for each of our files */
-  int* fds                 = (int*)           REDSET_MALLOC(numfiles * sizeof(int));
-  const char** filenames   = (const char**)   REDSET_MALLOC(numfiles * sizeof(char*));
-  unsigned long* filesizes = (unsigned long*) REDSET_MALLOC(numfiles * sizeof(unsigned long));
-
-  /* enter index, name, and size of each file */
-  unsigned long bytes = 0;
-  kvtree* files_hash = kvtree_set(current_hash, "FILE", kvtree_new());
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    const char* file_name = files[i];
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* total up number of bytes in our files */
-    bytes += file_size;
-
-    /* add entry for this file, including its index and name */
-    kvtree* file_hash = kvtree_setf(files_hash, kvtree_new(), "%d %s", i, file_name);
-
-    /* record file size of this file */
-    kvtree_util_set_bytecount(file_hash, "SIZE", file_size);
-
-    /* record entry in our names and sizes array */
-    filenames[i] = file_name;
-    filesizes[i] = file_size;
-
-    /* open the file */
-    fds[i] = redset_open(file_name, O_RDONLY);
-    if (fds[i] < 0) {
-      /* TODO: try again? */
-      redset_abort(-1, "Opening checkpoint file for copying: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-                file_name, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
+  /* open our logical file for reading */
+  redset_file rsf;
+  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    redset_abort(-1, "Opening data files for copying: @ %s:%d",
+      __FILE__, __LINE__
+    );
   }
 
   /* store our redundancy descriptor in hash */
@@ -143,14 +236,27 @@ int redset_apply_partner(
   redset_store_to_kvtree(d, desc_hash);
   kvtree_set(current_hash, "DESC", desc_hash);
 
-  /* exchange meta data with partner */
-  kvtree* partner_hash = kvtree_new();
-  kvtree_sendrecv(current_hash, state->rhs_rank, partner_hash, state->lhs_rank, comm);
-
   /* copy meta data to hash */
   kvtree* header = kvtree_new();
-  kvtree_set(header, "CURRENT", current_hash);
-  kvtree_set(header, "PARTNER", partner_hash);
+
+  /* copy meta data to hash */
+  kvtree_setf(header, current_hash, "%d", d->rank);
+
+  /* copy our descriptor N times to other ranks so it can be recovered
+   * with to the same degree as our encoding scheme */
+  for (i = 1; i <= state->replicas; i++) {
+    /* get ranks of procs to our left and right sides */
+    int lhs_rank = (d->rank - i + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + i + d->ranks) % d->ranks;
+
+    /* send our redundancy descriptor hash to the right,
+     * receive incoming hash from left neighbors */
+    kvtree* partner_hash = kvtree_new();
+    kvtree_sendrecv(current_hash, rhs_rank, partner_hash, lhs_rank, comm);
+
+    /* attach hash from this neighbor to our header */
+    kvtree_setf(header, partner_hash, "%d", lhs_rank);
+  }
 
   /* write meta data to file */
   char partner_file[REDSET_MAX_FILENAME];
@@ -162,90 +268,161 @@ int redset_apply_partner(
   if (fd_partner < 0) {
     /* TODO: try again? */
     redset_abort(-1, "Opening partner file for writing: redset_open(%s) errno=%d %s @ %s:%d",
-            partner_file, errno, strerror(errno), __FILE__, __LINE__
+      partner_file, errno, strerror(errno), __FILE__, __LINE__
     );
   }
+
+  /* sort the header to list items alphabetically,
+   * this isn't strictly required, but it ensures the kvtrees
+   * are stored in the same byte order so that we can reproduce
+   * the redundancy file identically on a rebuild */
+  redset_sort_kvtree(header);
 
   /* write out the partner header */
   kvtree_write_fd(partner_file, fd_partner, header);
   kvtree_delete(&header);
 
+  /* get offset into file immediately following the header */
+  off_t header_size = lseek(fd_partner, 0, SEEK_CUR);
+
   /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
 
-  /* allocate buffer to read a piece of the recevied chunk file */
-  char* recv_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (recv_buf == NULL) {
-    redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
+  /* allocate a receive buffer for each partner */
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
-  /* first, determine how many files we'll be sending and receiving
-   * with our partners */
-  MPI_Status status;
-  unsigned long outgoing = bytes;
-  unsigned long incoming;
-  MPI_Sendrecv(
-    &outgoing, 1, MPI_UNSIGNED_LONG, state->rhs_rank, 0,
-    &incoming, 1, MPI_UNSIGNED_LONG, state->lhs_rank, 0,
-    comm, &status
-  );
+  /* number of bytes summed across all of our files */
+  unsigned long outgoing = redset_file_bytes(&rsf);
+
+  /* determine how many bytes are coming from each of our partners */
+  unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  unsigned long* received = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  unsigned long* offsets  = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  for (i = 0; i < state->replicas; i++) {
+    /* get ranks of procs to our left and right sides */
+    int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+
+    /* send them our byte count and receive theirs */
+    MPI_Status st;
+    MPI_Sendrecv(
+      &outgoing,    1, MPI_UNSIGNED_LONG, rhs_rank, 0,
+      &incoming[i], 1, MPI_UNSIGNED_LONG, lhs_rank, 0,
+      comm, &st
+    );
+
+    /* this will track amount of data we have received from each partner */
+    received[i] = 0;
+
+    /* tracks starting offset into our redundancy file to store data for each partner */
+    if (i == 0) {
+      /* first partner file goes right after our header */
+      offsets[0] = 0;
+    } else {
+      /* each partner file is appended after the one before */
+      offsets[i] = offsets[i - 1] + incoming[i - 1];
+    }
+  }
 
   /* for each potential file, step through a call to swap */
-  MPI_Request req;
+  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(state->replicas * 2 * sizeof(MPI_Request));
+  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(state->replicas * 2 * sizeof(MPI_Status));
+
+  int done = 0;
   unsigned long send_offset = 0;
-  unsigned long recv_offset = 0;
-  while (send_offset < outgoing || recv_offset < incoming) {
+  while (! done) {
+    /* we'll assume this is the last iteration,
+     * and unset this flag if any process still has data at the end */
+    done = 1;
+
+    /* use this to track number of outstanding MPI operations */
+    int k = 0;
+
+    /* post receive buffers for each partner sending to us */
+    for (i = 0; i < state->replicas; i++) {
+      /* get rank to our left for this step */
+      int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+
+      /* compute number of incoming bytes in this step */
+      size_t recv_count = (size_t) (incoming[i] - received[i]);
+      if (recv_count > redset_mpi_buf_size) {
+        recv_count = redset_mpi_buf_size;
+      }
+
+      /* post receive for incoming data, if any */
+      if (recv_count > 0) {
+        MPI_Irecv(recv_bufs[i], recv_count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
+        k++;
+      }
+    }
+
     /* compute number of outgoing bytes in this step */
     size_t send_count = (size_t) (outgoing - send_offset);
     if (send_count > redset_mpi_buf_size) {
       send_count = redset_mpi_buf_size;
     }
 
-    /* compute number of incoming bytes in this step */
-    size_t recv_count = (size_t) (incoming - recv_offset);
-    if (recv_count > redset_mpi_buf_size) {
-      recv_count = redset_mpi_buf_size;
-    }
-
-    /* post receive for incoming data, if any */
-    if (recv_count > 0) {
-      MPI_Irecv(recv_buf, recv_count, MPI_BYTE, state->lhs_rank, 0, d->comm, &req);
-    }
-
-    /* send data if we have any */
+    /* read data from files */
     if (send_count > 0) {
-      /* read data from files */
-      if (redset_read_pad_n(numfiles, filenames, fds,
-                           send_buf, send_count, send_offset, filesizes) != REDSET_SUCCESS)
+      if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
       {
         rc = REDSET_FAILURE;
       }
-
-      /* send data out */
-      MPI_Send(send_buf, send_count, MPI_BYTE, state->rhs_rank, 0, d->comm);
     }
 
-    if (recv_count > 0) {
-      /* wait on incoming data */
-      MPI_Status status;
-      MPI_Wait(&req, &status);
+    /* send our data to each partner to our right */
+    for (i = 0; i < state->replicas; i++) {
+      /* get rank of right partner in this step */
+      int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
 
-      /* write block to partner file */
-      if (redset_write_attempt(partner_file, fd_partner, recv_buf, recv_count) != recv_count) {
-        rc = REDSET_FAILURE;
+      /* send data if we have any */
+      if (send_count > 0) {
+        MPI_Isend(send_bufs[0], send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
+        k++;
       }
     }
 
-    /* go on to the next iteration */
+    /* wait for communication to complete */
+    MPI_Waitall(k, request, status);
+
+    /* write received data to our partner file */
+    for (i = 0; i < state->replicas; i++) {
+      /* compute number of incoming bytes in this step */
+      size_t recv_count = (size_t) (incoming[i] - received[i]);
+      if (recv_count > redset_mpi_buf_size) {
+        recv_count = redset_mpi_buf_size;
+      }
+
+      /* nothing to do if this partner has sent us everything */
+      if (recv_count == 0) {
+        continue;
+      }
+
+      /* write block to partner file */
+      off_t offset = offsets[i] + received[i] + header_size;
+      if (redset_lseek(partner_file, fd_partner, offset, SEEK_SET) != REDSET_SUCCESS) {
+        rc = REDSET_FAILURE;
+      }
+      if (redset_write_attempt(partner_file, fd_partner, recv_bufs[i], recv_count) != recv_count) {
+        rc = REDSET_FAILURE;
+      }
+
+      /* update number of bytes we're received from this partner */
+      received[i] += recv_count;
+
+      /* unset done flag if we still need data from this partner */
+      if (received[i] < incoming[i]) {
+        done = 0;
+      }
+    }
+
+    /* update number of bytes we have sent */
     send_offset += send_count;
-    recv_offset += recv_count;
+
+    /* unset done flag if we still need to send data */
+    if (send_offset < outgoing) {
+      done = 0;
+    }
   }
 
   /* close my partner */
@@ -253,86 +430,23 @@ int redset_apply_partner(
     rc = REDSET_FAILURE;
   }
 
-  /* close my checkpoint files */
-  for (i=0; i < numfiles; i++) {
-    if (redset_close(filenames[i], fds[i]) != REDSET_SUCCESS) {
-      rc = REDSET_FAILURE;
-    }
+  /* close my data files */
+  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+    rc = REDSET_FAILURE;
   }
- 
+
   /* free the buffers */
-  redset_align_free(&recv_buf);
-  redset_align_free(&send_buf);
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
+  redset_buffers_free(state->replicas, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
+
+  redset_free(&incoming);
+  redset_free(&received);
+  redset_free(&offsets);
+
+  redset_free(&request);
+  redset_free(&status);
 
   return rc;
-}
-
-static int redset_partner_check_files(const kvtree* hash)
-{
-  if (hash == NULL) {
-    return 0;
-  }
-
-  /* assume we have our files */
-  int have_files = 1;
-
-  /* read total number of files we have */
-  int numfiles;
-  if (kvtree_util_get_int(hash, "FILES", &numfiles) == KVTREE_SUCCESS) {
-//  if (numfiles != numfiles_saved) {
-//    valid = 0;
-//  }
-  } else {
-    /* number of files not recorded */
-    have_files = 0;
-  }
-
-  /* verify that we have each file and that the size is correct for each one */
-  int i;
-  kvtree* files_hash = kvtree_get(hash, "FILE");
-  for (i = 0; i < numfiles; i++) {
-    /* get file name of this file */
-    kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-    kvtree_elem* elem = kvtree_elem_first(index_hash);
-    const char* file_name = kvtree_elem_key(elem);
-
-    /* lookup hash for this file */
-    kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-    if (file_hash == NULL) {
-      /* failed to find file name recorded */
-      have_files = 0;
-      continue;
-    }
-
-    /* check that file exists */
-    if (redset_file_exists(file_name) != REDSET_SUCCESS) {
-      /* failed to find file */
-      have_files = 0;
-      continue;
-    }
-
-    /* get file size of this file */
-    unsigned long file_size = redset_file_size(file_name);
-
-    /* lookup expected file size and compare to actual size */
-    unsigned long file_size_saved;
-    if (kvtree_util_get_bytecount(file_hash, "SIZE", &file_size_saved) == KVTREE_SUCCESS) {
-      if (file_size != file_size_saved) {
-        /* file size does not match */
-        have_files = 0;
-        continue;
-      }
-    } else {
-      /* file size not recorded */
-      have_files = 0;
-      continue;
-    }
-  }
-
-  return have_files;
 }
 
 int redset_recover_partner_rebuild(
@@ -350,25 +464,64 @@ int redset_recover_partner_rebuild(
   /* get pointer to partner state structure */
   redset_partner* state = (redset_partner*) d->state;
 
-  /* first, determine whether our partner has our files */
-  MPI_Status status;
-  int need_files = (have_my_files == 0);
-  int lhs_need_files, rhs_need_files;
-  MPI_Sendrecv(
-    &need_files,     1, MPI_INT, state->rhs_rank, 0,
-    &lhs_need_files, 1, MPI_INT, state->lhs_rank, 0,
-    comm, &status
-  );
-  MPI_Sendrecv(
-    &need_files,     1, MPI_INT, state->lhs_rank, 0,
-    &rhs_need_files, 1, MPI_INT, state->rhs_rank, 0,
-    comm, &status
-  );
+  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(state->replicas * 2 * sizeof(MPI_Request));
+  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(state->replicas * 2 * sizeof(MPI_Status));
 
-  /* if we're missing our files and our partner is missing files, we're out of luck */
+  /* let our partners know if we need our files */
+  int need_files = (have_my_files == 0);
+
+  int k = 0;
+  int* lhs_need = (int*) REDSET_MALLOC(state->replicas * sizeof(int));
+  for (i = 0; i < state->replicas; i++) {
+    /* get rank to our left for this step */
+    int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+
+    /* determine whether left parnter needs their files */
+    MPI_Irecv(&lhs_need[i], 1, MPI_INT, lhs_rank, 0, d->comm, &request[k]);
+    k++;
+
+    /* let our left partner know whether we need our files */
+    MPI_Isend(&need_files, 1, MPI_INT, rhs_rank, 0, d->comm, &request[k]);
+    k++;
+  }
+
+  /* wait for communication to complete */
+  MPI_Waitall(k, request, status);
+
+  k = 0;
+  int* rhs_need = (int*) REDSET_MALLOC(state->replicas * sizeof(int));
+  for (i = 0; i < state->replicas; i++) {
+    /* get rank to our left for this step */
+    int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+
+    /* determine whether left parnter needs their files */
+    MPI_Irecv(&rhs_need[i], 1, MPI_INT, rhs_rank, 0, d->comm, &request[k]);
+    k++;
+
+    /* let our left partner know whether we need our files */
+    MPI_Isend(&need_files, 1, MPI_INT, lhs_rank, 0, d->comm, &request[k]);
+    k++;
+  }
+
+  /* wait for communication to complete */
+  MPI_Waitall(k, request, status);
+
+  /* if we're missing our files and all of our partners are
+   * also missing files, we're out of luck */
   int can_rebuild = 1;
-  if (need_files && rhs_need_files) {
+  if (need_files) {
+    /* we're missing our files,
+     * check whether our partners have them */
     can_rebuild = 0;
+    for (i = 0; i < state->replicas; i++) {
+      if (! rhs_need[i]) {
+        /* found someone who has our files,
+         * so we can rebuild */
+        can_rebuild = 1;
+      }
+    }
   }
 
   /* determine whether all processes can rebuild */
@@ -376,18 +529,14 @@ int redset_recover_partner_rebuild(
     return REDSET_FAILURE;
   }
 
-  /* if we have our files and the processes to each side also
-   * have their files, we don't need to do anything */
-  if (!need_files && !lhs_need_files && !rhs_need_files) {
-    return REDSET_SUCCESS;
-  }
-
-  int num_files = 0;
+  redset_file rsf;
   int fd_partner = -1;
-  int* fds = NULL;
-  const char** filenames = NULL;
-  unsigned long* filesizes = NULL;
-  unsigned long bytes = 0;
+
+  kvtree* send_hash = NULL;
+  kvtree* recv_hash = NULL;
+
+  /* allocate a structure to record meta data about our files and redundancy descriptor */
+  kvtree* current_hash = NULL;
 
   /* get partner filename */
   char partner_file[REDSET_MAX_FILENAME];
@@ -396,9 +545,12 @@ int redset_recover_partner_rebuild(
   /* allocate hash object to read in (or receive) the header of the partner file */
   kvtree* header = kvtree_new();
 
+  /* size of header as encoded in redundancy file */
+  off_t header_size = 0;
+
   /* if process to our left or right is missing files, send along header info
    * so that process can write its header again */
-  if (lhs_need_files || rhs_need_files) {
+  if (! need_files) {
     /* open our partner file for reading */
     fd_partner = redset_open(partner_file, O_RDONLY);
     if (fd_partner < 0) {
@@ -410,292 +562,385 @@ int redset_recover_partner_rebuild(
     /* read in the partner header */
     kvtree_read_fd(partner_file, fd_partner, header);
 
-    /* if left-hand partner is missing files, send it the PARTNER data */
-    if (lhs_need_files) {
-      kvtree* partner_hash = kvtree_get(header, "PARTNER");
-      kvtree_send(partner_hash, state->lhs_rank, comm);
-    }
+    /* get offset into file immediately following the header */
+    header_size = lseek(fd_partner, 0, SEEK_CUR);
 
-    /* send CURRENT to right hand process */
-    if (rhs_need_files) {
-      kvtree* current_hash = kvtree_get(header, "CURRENT");
-      kvtree_send(current_hash, state->rhs_rank, comm);
-    }
-  }
+    /* get file info for this rank */
+    current_hash = kvtree_getf(header, "%d", d->rank);
 
-  /* receiving incoming header info and write out file */
-  if (need_files) {
-    /* build our partner header info from incoming data,
-     * note the order in which we receive is important here
-     * in case the we're getting both from the same process */
-    kvtree* current_hash = kvtree_new();
-    kvtree* partner_hash = kvtree_new();
-    kvtree_recv(current_hash, state->rhs_rank, d->comm);
-    kvtree_recv(partner_hash, state->lhs_rank, d->comm);
-    kvtree_set(header, "CURRENT", current_hash);
-    kvtree_set(header, "PARTNER", partner_hash);
-
-    /* get permissions for file */
-    mode_t mode_file = redset_getmode(1, 1, 0);
-
-    /* open my partner file for writing */
-    fd_partner = redset_open(partner_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-    if (fd_partner < 0) {
-      /* TODO: try again? */
-      redset_abort(-1, "Opening partner file for writing in partner rebuild: redset_open(%s) errno=%d %s @ %s:%d",
-        partner_file, errno, strerror(errno), __FILE__, __LINE__
-      );
-    }
-
-    /* write partner file header */
-    kvtree_write_fd(partner_file, fd_partner, header);
-  }
-
-  /* allocate buffer to read a piece of my file */
-  char* send_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (send_buf == NULL) {
-    redset_abort(-1, "Allocating memory for send buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
-
-  /* allocate buffer to read a piece of the recevied chunk file */
-  char* recv_buf = (char*) redset_align_malloc(redset_mpi_buf_size, redset_page_size);
-  if (recv_buf == NULL) {
-    redset_abort(-1, "Allocating memory for recv buffer: malloc(%d) errno=%d %s @ %s:%d",
-      redset_mpi_buf_size, errno, strerror(errno), __FILE__, __LINE__
-    );
-  }
-
-  /* first copy original files for process, then copy partner copies */
-
-  /* if right-hand side needs files, we need to resend our own files over
-   * to be recorded in its partner file, so open those up for reading */
-  if (rhs_need_files) {
-    /* lookup number of files this process wrote */
-    kvtree* current_hash = kvtree_get(header, "CURRENT");
-    if (kvtree_util_get_int(current_hash, "FILES", &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from partner file header: %s @ %s:%d",
+    /* open our logical file for reading */
+    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files to read for rebuild: %s @ %s:%d",
         partner_file, __FILE__, __LINE__
       );
     }
 
-    /* allocate arrays to hold file descriptors, filenames, and filesizes for each of our files */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
-
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
-
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in partner file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* total up number of bytes */
-      bytes += filesizes[i];
-
-      /* open the file for reading */
-      fds[i] = redset_open(file_name, O_RDONLY);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening checkpoint file for reading in partner rebuild: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-          file_name, errno, strerror(errno), __FILE__, __LINE__
-        );
+    /* if failed rank is to my left, i have its file info, send it the header */
+    send_hash = kvtree_new();
+    recv_hash = kvtree_new();
+    for (i = 0; i < state->replicas; i++) {
+      int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+      if (lhs_need[i]) {
+        kvtree* payload = kvtree_new();
+        kvtree_merge(payload, header);
+        kvtree_setf(send_hash, payload, "%d", lhs_rank);
       }
     }
-  }
+    kvtree_exchange(send_hash, recv_hash, d->comm);
+    kvtree_delete(&recv_hash);
+    kvtree_delete(&send_hash);
+  } else {
+    /* this process failed, read our metadata from another process
+     * we get our header from any rank that might have a copy */
+    send_hash = kvtree_new();
+    recv_hash = kvtree_new();
+    kvtree_exchange(send_hash, recv_hash, d->comm);
 
-  /* if we need files, open each of our files for writing */
-  if (need_files) {
-    /* get pointer to our current hash */
-    kvtree* current_hash = kvtree_get(header, "CURRENT");
+    /* get our descriptor from first entry we find,
+     * they are all the same */
+    kvtree_elem* desc_elem = kvtree_elem_first(recv_hash);
+    int source_rank = kvtree_elem_key_int(desc_elem);
+    kvtree* desc_hash = kvtree_elem_hash(desc_elem);
+    kvtree_merge(header, desc_hash);
 
-    /* get the number of files that we need to rebuild */
-    if (kvtree_util_get_int(current_hash, "FILES", &num_files) != REDSET_SUCCESS) {
-      redset_abort(-1, "Failed to read number of files from partner file header during rebuild @ %s:%d",
-        __FILE__, __LINE__
-      );
+    kvtree_delete(&recv_hash);
+    kvtree_delete(&send_hash);
+
+    /* get our current hash from header we received */
+    current_hash = kvtree_getf(header, "%d", d->rank);
+
+    /* unset descriptors for ranks other than our partners */
+    for (i = 0; i <= state->replicas; i++) {
+      /* step through entries the source rank would have */
+      int lhs_rank = (source_rank - i + d->ranks) % d->ranks;
+
+      /* don't delete our own entry */
+      if (lhs_rank == d->rank) {
+        continue;
+      }
+
+      /* TODO: do this more cleanly */
+      /* have to define the rank as a string */
+      char rankstr[1024];
+      snprintf(rankstr, sizeof(rankstr), "%d", lhs_rank);
+
+      /* now we can delete this entry */
+      kvtree_unset(header, rankstr);
     }
-
-    /* allocate items for each file */
-    fds       = (int*)           REDSET_MALLOC(num_files * sizeof(int));
-    filenames = (const char**)   REDSET_MALLOC(num_files * sizeof(char*));
-    filesizes = (unsigned long*) REDSET_MALLOC(num_files * sizeof(unsigned long));
 
     /* get permissions for file */
     mode_t mode_file = redset_getmode(1, 1, 0);
 
-    /* open each of our files */
-    kvtree* files_hash = kvtree_get(current_hash, "FILE");
-    for (i = 0; i < num_files; i++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* file_name = kvtree_elem_key(elem);
-  
-      /* lookup hash for this file */
-      kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
+    /* open our logical file for writing */
+    if (redset_file_open(current_hash, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+      redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
+        __FILE__, __LINE__
+      );
+    }
 
-      /* copy the full filename */
-      filenames[i] = file_name;
-      if (filenames[i] == NULL) {
-        redset_abort(-1, "Failed to copy filename during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* lookup the filesize */
-      if (kvtree_util_get_bytecount(file_hash, "SIZE", &filesizes[i]) != REDSET_SUCCESS) {
-        redset_abort(-1, "Failed to read file size for file %s in partner file header during rebuild @ %s:%d",
-          file_name, __FILE__, __LINE__
-        );
-      }
-
-      /* total up number of bytes */
-      bytes += filesizes[i];
-
-      /* open my file for writing */
-      fds[i] = redset_open(filenames[i], O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-      if (fds[i] < 0) {
-        /* TODO: try again? */
-        redset_abort(-1, "Opening file for writing in partner rebuild: redset_open(%s) errno=%d %s @ %s:%d",
-          filenames[i], errno, strerror(errno), __FILE__, __LINE__
-        );
-      }
+    /* open my redundancy file for writing */
+    fd_partner = redset_open(partner_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
+    if (fd_partner < 0) {
+      /* TODO: try again? */
+      redset_abort(-1, "Opening redundancy file for writing in rebuild: redset_open(%s) errno=%d %s @ %s:%d",
+        partner_file, errno, strerror(errno), __FILE__, __LINE__
+      );
     }
   }
 
-  /* read data from partner file and send to the left */
-  if (lhs_need_files) {
-    /* get number of bytes from left hand rank */
-    unsigned long outgoing;
-    MPI_Recv(&outgoing, 1, MPI_UNSIGNED_LONG, state->lhs_rank, 0, d->comm, &status);
+  /* if failed rank is to my right, send it my file info so it can write its header */
+  send_hash = kvtree_new();
+  recv_hash = kvtree_new();
+  for (i = 0; i < state->replicas; i++) {
+    int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+    if (rhs_need[i]) {
+      kvtree* payload = kvtree_new();
+      kvtree_merge(payload, current_hash);
+      kvtree_setf(send_hash, payload, "%d", rhs_rank);
+    }
+  }
+  kvtree_exchange(send_hash, recv_hash, d->comm);
 
-    /* send the data */
-    unsigned long offset = 0;
-    while (offset < outgoing) {
-      /* compute number of bytes for this step */
-      size_t count = (size_t) (outgoing - offset);
-      if (count > redset_mpi_buf_size) {
-        count = redset_mpi_buf_size;
+  if (need_files) {
+    /* receive copy of file info from left-side partners,
+     * we'll store a copy of their headers for redudancy */
+    kvtree_elem* desc_elem;
+    for (desc_elem = kvtree_elem_first(recv_hash);
+         desc_elem != NULL;
+         desc_elem = kvtree_elem_next(desc_elem))
+    {
+      /* get source rank that sent this descriptor */
+      char* rank_key = kvtree_elem_key(desc_elem);
+
+      /* get the descriptor that was sent to us */
+      kvtree* desc_hash = kvtree_elem_hash(desc_elem);
+
+      /* make a copy of it */
+      kvtree* partner_hash = kvtree_new();
+      kvtree_merge(partner_hash, desc_hash);
+
+      /* delete any existing entry */
+      kvtree_unset(header, rank_key);
+
+      /* attach the copy to our header */
+      kvtree_set(header, rank_key, partner_hash);
+    }
+
+    /* sort the header to list items alphabetically,
+     * this isn't strictly required, but it ensures the kvtrees
+     * are stored in the same byte order so that we can reproduce
+     * the redundancy file identically on a rebuild */
+    redset_sort_kvtree(header);
+
+    /* write partner file header */
+    kvtree_write_fd(partner_file, fd_partner, header);
+
+    /* get offset into file immediately following the header */
+    header_size = lseek(fd_partner, 0, SEEK_CUR);
+  }
+
+  kvtree_delete(&recv_hash);
+  kvtree_delete(&send_hash);
+
+  /* allocate buffer to read a piece of my file */
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+
+  /* allocate a receive buffer for each partner */
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
+
+  /* get file size of our logical file */
+  unsigned long bytes = redset_file_bytes(&rsf);
+
+  unsigned long outgoing = bytes;
+  unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  unsigned long* received = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  unsigned long* offsets  = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
+  for (i = 0; i < state->replicas; i++) {
+    /* get ranks of procs to our left and right sides */
+    int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+    int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+
+    /* send them our byte count and receive theirs */
+    MPI_Status st;
+    MPI_Sendrecv(
+      &outgoing,    1, MPI_UNSIGNED_LONG, rhs_rank, 0,
+      &incoming[i], 1, MPI_UNSIGNED_LONG, lhs_rank, 0,
+      comm, &st
+    );
+
+    /* this will track amount of data we have received from each partner */
+    received[i] = 0;
+
+    /* tracks starting offset into our redundancy file to store data for each partner */
+    if (i == 0) {
+      /* first partner file goes right after our header */
+      offsets[0] = 0;
+    } else {
+      /* each partner file is appended after the one before */
+      offsets[i] = offsets[i - 1] + incoming[i - 1];
+    }
+  }
+
+  /* first copy original files for process, then copy partner copies */
+
+  /* TODO: find a more distributed algorithm to spread the load */
+  /* for now, assume we have to send if we're the first process with our
+   * our left neighbor's files, for each rank to our left */
+  if (! need_files) {
+    for (i = 0; i < state->replicas; i++) {
+      int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+      if (lhs_need[i]) {
+        /* get number of bytes to send to this partner */
+        unsigned long outgoing = incoming[i];
+
+        /* send the data */
+        unsigned long offset = 0;
+        while (received[i] < outgoing) {
+          /* compute number of bytes for this step */
+          size_t count = (size_t) (outgoing - received[i]);
+          if (count > redset_mpi_buf_size) {
+            count = redset_mpi_buf_size;
+          }
+
+          /* read data from the partner file */
+          off_t offset = offsets[i] + received[i] + header_size;
+          if (redset_lseek(partner_file, fd_partner, offset, SEEK_SET) != REDSET_SUCCESS) {
+            rc = REDSET_FAILURE;
+          }
+          if (redset_read_attempt(partner_file, fd_partner, send_bufs[0], count) != count) {
+            /* read failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+
+          /* send data to left partner */
+          MPI_Send(send_bufs[0], count, MPI_BYTE, lhs_rank, 0, d->comm);
+
+          /* sum up the bytes we've sent so far */
+          received[i] += count;
+        }
+      } else {
+        /* found someone to our left who has files,
+         * so we don't need to send to them and they will
+         * send to all others further to the left */
+         break;
       }
-
-      /* read data from the partner file */
-      if (redset_read_attempt(partner_file, fd_partner, send_buf, count) != count) {
-        /* read failed, make sure we fail this rebuild */
-        rc = REDSET_FAILURE;
-      }
-
-      /* send data to left partner */
-      MPI_Send(send_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm);
-
-      offset += count;
     }
   }
 
   /* receive data from right and write out our files */
   if (need_files) {
-    /* inform right hand rank how many bytes we'll need */
-    MPI_Send(&bytes, 1, MPI_UNSIGNED_LONG, state->rhs_rank, 0, d->comm);
+    for (i = 0; i < state->replicas; i++) {
+      /* look for the first rank to our right that has our files */
+      int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
+      if (! rhs_need[i]) {
+        /* found someone with our files, let's get them */
+        unsigned long offset = 0;
+        while (offset < bytes) {
+          /* compute number of bytes for this step */
+          size_t count = (size_t) (bytes - offset);
+          if (count > redset_mpi_buf_size) {
+            count = redset_mpi_buf_size;
+          }
 
-    /* receive the data */
-    unsigned long offset = 0;
-    while (offset < bytes) {
-      /* compute number of bytes for this step */
-      size_t count = (size_t) (bytes - offset);
-      if (count > redset_mpi_buf_size) {
-        count = redset_mpi_buf_size;
+          /* receive data from right partner */
+          MPI_Recv(recv_bufs[i], count, MPI_BYTE, rhs_rank, 0, d->comm, &status[0]);
+
+          /* write data to the logical file */
+          if (redset_file_pwrite(&rsf, recv_bufs[i], count, offset) != REDSET_SUCCESS)
+          {
+            /* write failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+
+          offset += count;
+        }
+
+        /* we're done after we get them from the first rank */
+        break;
       }
-
-      /* receive data from right partner */
-      MPI_Recv(recv_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm, &status);
-
-      /* write data to the logical file */
-      if (redset_write_pad_n(num_files, filenames, fds,
-                          recv_buf, count, offset, filesizes) != REDSET_SUCCESS)
-      {
-        /* write failed, make sure we fail this rebuild */
-        rc = REDSET_FAILURE;
-      }
-
-      offset += count;
     }
   }
 
-  /* read data from our files and send to left for partner copy */
-  if (rhs_need_files) {
-    /* inform right hand rank how many bytes we'll send */
-    MPI_Send(&bytes, 1, MPI_UNSIGNED_LONG, state->rhs_rank, 0, d->comm);
+  /* reinitialize our received counters */
+  for (i = 0; i < state->replicas; i++) {
+    received[i] = 0;
+  }
 
-    /* send the data */
-    unsigned long offset = 0;
-    while (offset < bytes) {
-      /* compute number of bytes for this step */
-      size_t count = (size_t) (bytes - offset);
-      if (count > redset_mpi_buf_size) {
-        count = redset_mpi_buf_size;
-      }
-
-      /* for this chunk, read data from the logical file */
-      if (redset_read_pad_n(num_files, filenames, fds,
-                         send_buf, count, offset, filesizes) != REDSET_SUCCESS)
-      {
-        /* read failed, make sure we fail this rebuild */
-        rc = REDSET_FAILURE;
-      }
-
-      /* send data to right-side partner */
-      MPI_Send(send_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm);
-
-      offset += count;
+  /* determine whether we have to send our file to anyone */
+  int need_send = 0;
+  for (i = 0; i < state->replicas; i++) {
+    if (rhs_need[i]) {
+      /* someone to our right failed, so we need to send them our files */
+      need_send = 1;
     }
   }
 
-  /* receive data from left rank and write to partner file */
-  if (need_files) {
-    /* get number of incoming bytes */
-    unsigned long incoming;
-    MPI_Recv(&incoming, 1, MPI_UNSIGNED_LONG, state->lhs_rank, 0, d->comm, &status);
+  int done = 0;
+  unsigned long send_offset = 0;
+  while (! done) {
+    /* we'll assume this is the last iteration,
+     * and unset this flag if any process still has data at the end */
+    done = 1;
 
-    /* receive the data */
-    unsigned long offset = 0;
-    while (offset < incoming) {
-      /* compute number of bytes in this transfer */
-      size_t count = (size_t) (incoming - offset);
-      if (count > redset_mpi_buf_size) {
-        count = redset_mpi_buf_size;
+    /* use this to track number of outstanding MPI operations */
+    k = 0;
+
+    /* post receive buffers for each partner sending to us */
+    if (need_files) {
+      for (i = 0; i < state->replicas; i++) {
+        /* get rank to our left for this step */
+        int lhs_rank = (d->rank - (i + 1) + d->ranks) % d->ranks;
+
+        /* compute number of incoming bytes in this step */
+        size_t recv_count = (size_t) (incoming[i] - received[i]);
+        if (recv_count > redset_mpi_buf_size) {
+          recv_count = redset_mpi_buf_size;
+        }
+
+        /* post receive for incoming data, if any */
+        if (recv_count > 0) {
+          MPI_Irecv(recv_bufs[i], recv_count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
+          k++;
+        }
+      }
+    }
+
+    /* compute number of outgoing bytes in this step */
+    size_t send_count = (size_t) (outgoing - send_offset);
+    if (send_count > redset_mpi_buf_size) {
+      send_count = redset_mpi_buf_size;
+    }
+
+    /* send data out if we need to */
+    if (need_send) {
+      /* read data from files */
+      if (send_count > 0) {
+        if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
+        {
+          rc = REDSET_FAILURE;
+        }
       }
 
-      /* receive incoming data */
-      MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status);
+      /* send our data to each partner to our right */
+      for (i = 0; i < state->replicas; i++) {
+        if (rhs_need[i]) {
+          /* get rank of right partner in this step */
+          int rhs_rank = (d->rank + (i + 1) + d->ranks) % d->ranks;
 
-      /* write data to partner file */
-      if (redset_write_attempt(partner_file, fd_partner, recv_buf, count) != count) {
-        /* write failed, make sure we fail this rebuild */
-        rc = REDSET_FAILURE;
+          /* send data if we have any */
+          if (send_count > 0) {
+            MPI_Isend(send_bufs[0], send_count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
+            k++;
+          }
+        }
       }
+    }
 
-      offset += count;
+    /* wait for communication to complete */
+    MPI_Waitall(k, request, status);
+
+    /* write received data to our partner file */
+    if (need_files) {
+      for (i = 0; i < state->replicas; i++) {
+        /* compute number of incoming bytes in this step */
+        size_t recv_count = (size_t) (incoming[i] - received[i]);
+        if (recv_count > redset_mpi_buf_size) {
+          recv_count = redset_mpi_buf_size;
+        }
+
+        /* nothing to do if this partner has sent us everything */
+        if (recv_count == 0) {
+          continue;
+        }
+
+        /* write block to partner file */
+        off_t offset = offsets[i] + received[i] + header_size;
+        if (redset_lseek(partner_file, fd_partner, offset, SEEK_SET) != REDSET_SUCCESS) {
+          rc = REDSET_FAILURE;
+        }
+        if (redset_write_attempt(partner_file, fd_partner, recv_bufs[i], recv_count) != recv_count) {
+          rc = REDSET_FAILURE;
+        }
+
+        /* update number of bytes we're received from this partner */
+        received[i] += recv_count;
+
+        /* unset done flag if we still need data from this partner */
+        if (received[i] < incoming[i]) {
+          done = 0;
+        }
+      }
+    }
+
+    /* determine whether we're still sending data */
+    if (need_send) {
+      /* update number of bytes we have sent */
+      send_offset += send_count;
+
+      /* unset done flag if we still need to send data */
+      if (send_offset < outgoing) {
+        done = 0;
+      }
     }
   }
 
@@ -704,19 +949,30 @@ int redset_recover_partner_rebuild(
     rc = REDSET_FAILURE;
   }
 
-  /* close my checkpoint files */
-  for (i=0; i < num_files; i++) {
-    if (redset_close(filenames[i], fds[i]) != REDSET_SUCCESS) {
-      rc = REDSET_FAILURE;
-    }
+  /* close my data files */
+  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+    rc = REDSET_FAILURE;
   }
- 
+
+  /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
+  if (need_files) {
+    redset_file_apply_meta(current_hash);
+  }
+
   /* free the buffers */
-  redset_align_free(&recv_buf);
-  redset_align_free(&send_buf);
-  redset_free(&filesizes);
-  redset_free(&filenames);
-  redset_free(&fds);
+  redset_free(&rhs_need);
+  redset_free(&lhs_need);
+
+  redset_free(&request);
+  redset_free(&status);
+
+  redset_free(&incoming);
+  redset_free(&received);
+  redset_free(&offsets);
+
+  redset_buffers_free(state->replicas, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
+
   kvtree_delete(&header);
 
   return rc;
@@ -729,29 +985,21 @@ int redset_recover_partner(
   int rc = REDSET_SUCCESS;
   MPI_Comm comm_world = d->parent_comm;
 
-  /* get name of partner file */
-  char partner_file[REDSET_MAX_FILENAME];
-  redset_build_partner_filename(name, d, partner_file, sizeof(partner_file));
-
   /* assume we have our files */
   int have_my_files = 1;
 
   /* check whether we have our files and our partner's files */
   kvtree* header = kvtree_new();
-  if (redset_read_partner_file(name, d, header)) {
+  if (redset_read_partner_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
-    kvtree* current_hash = kvtree_get(header, "CURRENT");
-    if (! redset_partner_check_files(current_hash)) {
+    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       have_my_files = 0;
     }
-
-    /* TODO: how to verify that partner file is valid? */
   } else {
     /* failed to read partner file */
     have_my_files = 0;
   }
-
-  /* delete the hash */
   kvtree_delete(&header);
 
   /* attempt to rebuild if any process is missing its files */
