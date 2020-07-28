@@ -4,6 +4,8 @@
 #include "kvtree.h"
 #include "redset.h"
 
+#define REDSET_VERSION "1.0"
+
 typedef struct {
   int      enabled;        /* flag indicating whether this descriptor is active */
   int      type;           /* redundancy scheme to apply */
@@ -54,10 +56,12 @@ typedef struct {
   unsigned int*  mat;        /* encoding matrix (ranks + encoding) x ranks */
 } redset_reedsolomon;
 
+#if 0
 typedef struct {
   int count;
   const char** files;
 } redset_list;
+#endif
 
 int redset_set_partners(
   MPI_Comm parent_comm, MPI_Comm comm, int dist,

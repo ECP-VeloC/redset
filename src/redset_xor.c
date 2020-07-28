@@ -32,7 +32,11 @@ static void redset_build_xor_filename(
   char* file, 
   size_t len)
 {
-  snprintf(file, len, "%s.xor.%d_%d_of_%d.redset", name, d->group_id, d->rank+1, d->ranks);
+  int parent_rank;
+  MPI_Comm_rank(d->parent_comm, &parent_rank);
+  snprintf(file, len, "%s.xor.grp_%d_of_%d.mem_%d_of_%d.%d.redset",
+    name, d->group_id+1, d->groups, d->rank+1, d->ranks, parent_rank
+  );
 }
 
 /* returns true if a an XOR file is found for this rank for the given checkpoint id,
@@ -62,7 +66,7 @@ static int redset_read_xor_file(
   return REDSET_SUCCESS;
 }
 
-#define REDSET_KEY_COPY_XOR_RANKS "RANKS"
+#define REDSET_KEY_COPY_XOR_DESC  "DESC"
 #define REDSET_KEY_COPY_XOR_GROUP "GROUP"
 #define REDSET_KEY_COPY_XOR_GROUP_RANK  "RANK"
 #define REDSET_KEY_COPY_XOR_GROUP_RANKS "RANKS"
@@ -82,10 +86,10 @@ int redset_construct_xor(MPI_Comm parent_comm, redset_base* d)
   /* allocate a new hash to store group mapping info */
   kvtree* header = kvtree_new();
 
-  /* record the total number of ranks in parent comm */
-  int parent_ranks;
-  MPI_Comm_size(parent_comm, &parent_ranks);
-  kvtree_set_kv_int(header, REDSET_KEY_COPY_XOR_RANKS, parent_ranks);
+  /* record our global rank in parent comm */
+  int parent_rank;
+  MPI_Comm_rank(parent_comm, &parent_rank);
+  kvtree_set_kv_int(header, REDSET_KEY_COPY_XOR_GROUP_RANK, d->rank);
 
   /* create a new empty hash to track group info for this xor set */
   kvtree* hash = kvtree_new();
@@ -233,7 +237,7 @@ int redset_apply_xor(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
-  kvtree_set(current_hash, "DESC", desc_hash);
+  kvtree_set(current_hash, REDSET_KEY_COPY_XOR_DESC, desc_hash);
 
   /* exchange meta data with partner */
   kvtree* partner_hash = kvtree_new();
@@ -241,8 +245,8 @@ int redset_apply_xor(
 
   /* copy meta data to hash */
   kvtree* header = kvtree_new();
-  kvtree_setf(header, current_hash, "%d", d->rank);
-  kvtree_setf(header, partner_hash, "%d", state->lhs_rank);
+  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+  kvtree_setf(header, partner_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, state->lhs_rank);
 
   /* record the global ranks of the processes in our xor group */
   kvtree_merge(header, state->group_map);
@@ -407,7 +411,7 @@ int redset_recover_xor_rebuild(
     kvtree_read_fd(xor_file, fd_xor, header);
 
     /* lookup our file info */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
 
     /* open our data files for reading */
     if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
@@ -432,20 +436,23 @@ int redset_recover_xor_rebuild(
     kvtree_recv(header, state->rhs_rank, d->comm);
 
     /* get our file info */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+
+    /* replace the rank id with our own */
+    kvtree_util_set_int(header, REDSET_KEY_COPY_XOR_GROUP_RANK, d->rank);
 
     /* unset file info for rank who sent this to us */
     /* TODO: do this more cleanly */
     /* have to define the rank as a string */
     char rankstr[1024];
-    snprintf(rankstr, sizeof(rankstr), "%d", state->rhs_rank);
+    snprintf(rankstr, sizeof(rankstr), "%s %d", REDSET_KEY_COPY_XOR_DESC, state->rhs_rank);
     kvtree_unset(header, rankstr);
 
     /* receive number of files our left-side partner has and allocate an array of
      * meta structures to store info */
     kvtree* partner_hash = kvtree_new();
     kvtree_recv(partner_hash, state->lhs_rank, d->comm);
-    kvtree_setf(header, partner_hash, "%d", state->lhs_rank);
+    kvtree_setf(header, partner_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, state->lhs_rank);
 
     /* get permissions for file */
     mode_t mode_file = redset_getmode(1, 1, 0);
@@ -630,7 +637,7 @@ int redset_recover_xor(
   kvtree* header = kvtree_new();
   if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
     /* got our XOR file, see if we have each data file */
-    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       need_rebuild = 1;
@@ -696,5 +703,113 @@ redset_list* redset_filelist_get_xor(
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);
+  return list;
+}
+
+redset_filelist redset_filelist_get_data(
+  int num,
+  const char** files)
+{
+  int total_ranks = 0;
+  int total_files = 0;
+  kvtree** current_hashes = NULL;
+
+  int i;
+  for (i = 0; i < num; i++) {
+    /* open the current file */
+    const char* file = files[i];
+    int fd = redset_open(file, O_RDONLY);
+    if (fd < 0) {
+      redset_err("Opening XOR file for reading: redset_open(%s) errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      return NULL;
+    }
+
+    /* read header from the file */
+    kvtree* header = kvtree_new();
+    kvtree_read_fd(file, fd, header);
+
+    /* if this is our first file, get number of ranks in the redudancy group */
+    if (current_hashes == NULL) {
+      /* read number of items in the redudancy group */
+      kvtree* group_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_GROUP);
+      kvtree_util_get_int(group_hash, REDSET_KEY_COPY_XOR_GROUP_RANKS, &total_ranks);
+
+      /* allocate a spot to hold the file info for each member */
+      current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
+
+      /* initialize all spots to NULL so we know whether we've already read it in */
+      int j;
+      for (j = 0; j < total_ranks; j++) {
+        current_hashes[j] = NULL;
+      }
+    }
+
+    /* get file info for each rank we can pull from this header */
+    kvtree* desc_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_DESC);
+    kvtree_elem* rank_elem;
+    for (rank_elem = kvtree_elem_first(desc_hash);
+         rank_elem != NULL;
+         rank_elem = kvtree_elem_next(rank_elem))
+    {
+      /* get the rank of the file info */
+      int rank = kvtree_elem_key_int(rank_elem);
+
+      /* copy to our array if it's not already set */
+      if (current_hashes[rank] == NULL) {
+        /* not set, get pointer to file info */
+        kvtree* rank_hash = kvtree_elem_hash(rank_elem);
+
+        /* allocate an empty kvtree and copy the file info */
+        current_hashes[rank] = kvtree_new();
+        kvtree_merge(current_hashes[rank], rank_hash);
+
+        /* get number of files for this rank */
+        int numfiles = 0;
+        kvtree_util_get_int(rank_hash, "FILES", &numfiles);
+
+        /* sum the files to our running total across all ranks */
+        total_files += numfiles;
+      }
+    }
+
+    kvtree_delete(&header);
+
+    redset_close(file, fd);
+  }
+
+  /* allocate a list to hold files for all ranks */
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
+
+  list->count = total_files;
+  list->files = (const char**) REDSET_MALLOC(total_files * sizeof(char*));
+
+  int idx = 0;
+  for (i = 0; i < total_ranks; i++) {
+    if (current_hashes[i] == NULL) {
+      /* ERROR! */
+    }
+
+    /* get number of files for this rank */
+    int numfiles = 0;
+    kvtree_util_get_int(current_hashes[i], "FILES", &numfiles);
+
+    int j;
+    kvtree* files_hash = kvtree_get(current_hashes[i], "FILE");
+    for (j = 0; j < numfiles; j++) {
+      /* get file name of this file */
+      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
+      kvtree_elem* elem = kvtree_elem_first(index_hash);
+      const char* filename = kvtree_elem_key(elem);
+      list->files[idx] = strdup(filename);
+      idx++;
+    }
+
+    kvtree_delete(&current_hashes[i]);
+  }
+
+  redset_free(&current_hashes);
+
   return list;
 }

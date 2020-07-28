@@ -69,6 +69,7 @@ void** redset_buffers_alloc(int num, size_t size);
 /* free a set of buffers allocated in redset_buffers_alloc */
 void redset_buffers_free(int num, void* pbufs);
 
+#if 0
 /* structure to track an ordered set of files and operate on
  * them as one logical, continuous file */
 typedef struct {
@@ -102,5 +103,6 @@ int redset_file_close(redset_file* rsf);
 
 /* given a hash that defines a set of files, apply metadata recorded to each file */
 int redset_file_apply_meta(kvtree* hash);
+#endif
 
 #endif

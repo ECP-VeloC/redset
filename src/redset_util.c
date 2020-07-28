@@ -1,9 +1,23 @@
+/* to get nsec fields in stat structure */
+#define _GNU_SOURCE
+
+/* TODO: ugly hack until we get a configure test */
+#if defined(__APPLE__)
+#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
+#else
+#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
+#endif
+// HAVE_STRUCT_STAT_ST_MTIME_N
+// HAVE_STRUCT_STAT_ST_UMTIME
+// HAVE_STRUCT_STAT_ST_MTIME_USEC
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <libgen.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 // for stat
 #include <sys/types.h>
@@ -18,7 +32,6 @@
 /* compute crc32 */
 #include <zlib.h>
 
-#include "mpi.h"
 #include "kvtree.h"
 
 #include "redset.h"
@@ -26,61 +39,7 @@
 
 #define REDSET_VERSION "1.0"
 
-int redset_debug = 1;
-
-int redset_rank = -1;
-char* redset_hostname = NULL;
-
-int redset_mpi_buf_size;
 size_t redset_page_size;
-
-/* print error message to stdout */
-void redset_err(const char *fmt, ...)
-{
-  va_list argp;
-  fprintf(stdout, "REDSET %s ERROR: rank %d on %s: ", REDSET_VERSION, redset_rank, redset_hostname);
-  va_start(argp, fmt);
-  vfprintf(stdout, fmt, argp);
-  va_end(argp);
-  fprintf(stdout, "\n");
-}
-
-/* print warning message to stdout */
-void redset_warn(const char *fmt, ...)
-{
-  va_list argp;
-  fprintf(stdout, "REDSET %s WARNING: rank %d on %s: ", REDSET_VERSION, redset_rank, redset_hostname);
-  va_start(argp, fmt);
-  vfprintf(stdout, fmt, argp);
-  va_end(argp);
-  fprintf(stdout, "\n");
-}
-
-/* print message to stdout if redset_debug is set and it is >= level */
-void redset_dbg(int level, const char *fmt, ...)
-{
-  va_list argp;
-  if (level == 0 || (redset_debug > 0 && redset_debug >= level)) {
-    fprintf(stdout, "REDSET %s: rank %d on %s: ", REDSET_VERSION, redset_rank, redset_hostname);
-    va_start(argp, fmt);
-    vfprintf(stdout, fmt, argp);
-    va_end(argp);
-    fprintf(stdout, "\n");
-  }
-}
-
-/* print abort message and call MPI_Abort to kill run */
-void redset_abort(int rc, const char *fmt, ...)
-{
-  va_list argp;
-  fprintf(stderr, "REDSET %s ABORT: rank %d on %s: ", REDSET_VERSION, redset_rank, redset_hostname);
-  va_start(argp, fmt);
-  vfprintf(stderr, fmt, argp);
-  va_end(argp);
-  fprintf(stderr, "\n");
-
-  MPI_Abort(MPI_COMM_WORLD, rc);
-}
 
 /* allocate size bytes, returns NULL if size == 0,
  * calls redset_abort if allocation fails */
@@ -168,73 +127,6 @@ void redset_align_free(void* p)
 #endif
 }
 
-/* sends a NUL-terminated string to a process,
- * allocates space and recieves a NUL-terminated string from a process,
- * can specify MPI_PROC_NULL as either send or recv rank */
-int redset_str_sendrecv(
-  const char* send_str, int send_rank,
-  char** recv_str,      int recv_rank,
-  MPI_Comm comm)
-{
-  MPI_Status status;
-
-  /* get length of our send string */
-  int send_len = 0;
-  if (send_str != NULL) {
-    send_len = strlen(send_str) + 1;
-  }
-
-  /* exchange length of strings, note that we initialize recv_len
-   * so that it's valid if we recieve from MPI_PROC_NULL */
-  int recv_len = 0;
-  MPI_Sendrecv(
-    &send_len, 1, MPI_INT, send_rank, 999,
-    &recv_len, 1, MPI_INT, recv_rank, 999,
-    comm, &status
-  );
-
-  /* if receive length is positive, allocate space to receive string */
-  char* tmp_str = NULL;
-  if (recv_len > 0) {
-    tmp_str = (char*) REDSET_MALLOC(recv_len);
-  }
-
-  /* exchange strings */
-  MPI_Sendrecv(
-    (void*) send_str, send_len, MPI_CHAR, send_rank, 999,
-    (void*) tmp_str,  recv_len, MPI_CHAR, recv_rank, 999,
-    comm, &status
-  );
-
-  /* return address of allocated string in caller's pointer */
-  *recv_str = tmp_str;
-  return REDSET_SUCCESS;
-}
-
-int redset_alltrue(int flag, MPI_Comm comm)
-{
-  int all_true;
-  MPI_Allreduce(&flag, &all_true, 1, MPI_INT, MPI_LAND, comm);
-  return all_true;
-}
-
-/* recursively sort a kvtree in alphabetical order */
-void redset_sort_kvtree(kvtree* hash)
-{
-  kvtree_elem* elem;
-  for (elem = kvtree_elem_first(hash);
-       elem != NULL;
-       elem = kvtree_elem_next(elem))
-  {
-    kvtree* t = kvtree_elem_hash(elem);
-    redset_sort_kvtree(t);
-  }
-
-  kvtree_sort(hash, KVTREE_SORT_ASCENDING);
-
-  return;
-}
-
 /* allocate a set of num buffers each of size bytes for MPI communication or redundancy encoding */
 void** redset_buffers_alloc(int num, size_t size)
 {
@@ -284,6 +176,207 @@ void redset_buffers_free(int num, void* pbufs)
   return;
 }
 
+/* recursively sort a kvtree in alphabetical order */
+void redset_sort_kvtree(kvtree* hash)
+{
+  kvtree_elem* elem;
+  for (elem = kvtree_elem_first(hash);
+       elem != NULL;
+       elem = kvtree_elem_next(elem))
+  {
+    kvtree* t = kvtree_elem_hash(elem);
+    redset_sort_kvtree(t);
+  }
+
+  kvtree_sort(hash, KVTREE_SORT_ASCENDING);
+
+  return;
+}
+
+static void redset_stat_get_atimes(const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_atime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_atime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uatime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_atime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_mtimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_mtime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_mtime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_umtime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_mtime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void redset_stat_get_ctimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_ctime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_ctim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_ctime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uctime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_ctime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+int redset_meta_encode(const char* file, kvtree* meta)
+{
+  struct stat statbuf;
+  int rc = redset_stat(file, &statbuf);
+  if (rc == 0) {
+    kvtree_util_set_unsigned_long(meta, "MODE", (unsigned long) statbuf.st_mode);
+    kvtree_util_set_unsigned_long(meta, "UID",  (unsigned long) statbuf.st_uid);
+    kvtree_util_set_unsigned_long(meta, "GID",  (unsigned long) statbuf.st_gid);
+    kvtree_util_set_unsigned_long(meta, "SIZE", (unsigned long) statbuf.st_size);
+
+    uint64_t secs, nsecs;
+    redset_stat_get_atimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "ATIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_ctimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "CTIME_NSECS", (unsigned long) nsecs);
+
+    redset_stat_get_mtimes(&statbuf, &secs, &nsecs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_SECS",  (unsigned long) secs);
+    kvtree_util_set_unsigned_long(meta, "MTIME_NSECS", (unsigned long) nsecs);
+
+    return REDSET_SUCCESS;
+  }
+  return REDSET_FAILURE;
+}
+
+int redset_meta_apply(const char* file, const kvtree* meta)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* set permission bits on file */
+  unsigned long mode_val;
+  if (kvtree_util_get_unsigned_long(meta, "MODE", &mode_val) == KVTREE_SUCCESS) {
+    mode_t mode = (mode_t) mode_val;
+
+    /* TODO: mask some bits here */
+
+    int chmod_rc = chmod(file, mode);
+    if (chmod_rc != 0) {
+      /* failed to set permissions */
+      redset_err("chmod(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set uid and gid on file */
+  unsigned long uid_val = -1;
+  unsigned long gid_val = -1;
+  kvtree_util_get_unsigned_long(meta, "UID", &uid_val);
+  kvtree_util_get_unsigned_long(meta, "GID", &gid_val);
+  if (uid_val != -1 || gid_val != -1) {
+    /* got a uid or gid value, try to set them */
+    int chown_rc = chown(file, (uid_t) uid_val, (gid_t) gid_val);
+    if (chown_rc != 0) {
+      /* failed to set uid and gid */
+      redset_err("chown(%s, %lu, %lu) failed: errno=%d %s @ %s:%d",
+        file, uid_val, gid_val, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* can't set the size at this point, but we can check it */
+  unsigned long size;
+  if (kvtree_util_get_unsigned_long(meta, "SIZE", &size) == KVTREE_SUCCESS) {
+    /* got a size field in the metadata, stat the file */
+    struct stat statbuf;
+    int stat_rc = redset_stat(file, &statbuf);
+    if (stat_rc == 0) {
+      /* stat succeeded, check that sizes match */
+      if (size != statbuf.st_size) {
+        /* file size is not correct */
+        redset_err("file `%s' size is %lu expected %lu @ %s:%d",
+          file, (unsigned long) statbuf.st_size, size, __FILE__, __LINE__
+        );
+        rc = REDSET_FAILURE;
+      }
+    } else {
+      /* failed to stat file */
+      redset_err("stat(%s) failed: errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  /* set timestamps on file as last step */
+  unsigned long atime_secs  = 0;
+  unsigned long atime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "ATIME_SECS",  &atime_secs);
+  kvtree_util_get_unsigned_long(meta, "ATIME_NSECS", &atime_nsecs);
+
+  unsigned long mtime_secs  = 0;
+  unsigned long mtime_nsecs = 0;
+  kvtree_util_get_unsigned_long(meta, "MTIME_SECS",  &mtime_secs);
+  kvtree_util_get_unsigned_long(meta, "MTIME_NSECS", &mtime_nsecs);
+
+  if (atime_secs != 0 || atime_nsecs != 0 ||
+      mtime_secs != 0 || mtime_nsecs != 0)
+  {
+    /* fill in time structures */
+    struct timespec times[2];
+    times[0].tv_sec  = (time_t) atime_secs;
+    times[0].tv_nsec = (long)   atime_nsecs;
+    times[1].tv_sec  = (time_t) mtime_secs;
+    times[1].tv_nsec = (long)   mtime_nsecs;
+
+    /* set times with nanosecond precision using utimensat,
+     * assume path is relative to current working directory,
+     * if it's not absolute, and set times on link (not target file)
+     * if dest_path refers to a link */
+    int utime_rc = utimensat(AT_FDCWD, file, times, AT_SYMLINK_NOFOLLOW);
+    if (utime_rc != 0) {
+      redset_err("Failed to change timestamps on `%s' utimensat() errno=%d %s @ %s:%d",
+        file, errno, strerror(errno), __FILE__, __LINE__
+      );
+      rc = REDSET_FAILURE;
+    }
+  }
+
+  return rc;
+}
+
 int redset_file_encode_kvtree(kvtree* hash, int num, const char** files)
 {
   int rc = REDSET_SUCCESS;
@@ -303,6 +396,26 @@ int redset_file_encode_kvtree(kvtree* hash, int num, const char** files)
 
     /* record file meta data of this file */
     redset_meta_encode(file, file_hash);
+  }
+
+  return rc;
+}
+
+int redset_file_encode_map(kvtree* hash, int num, const char** src_files, const char** dst_files)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* record total number of files we have */
+  kvtree_set_kv_int(hash, "FILES", num);
+
+  /* enter index, name, and size of each file */
+  int i;
+  kvtree* files_hash = kvtree_set(hash, "FILE", kvtree_new());
+  for (i = 0; i < num; i++) {
+    /* get file name of this file */
+    const char* src_file = src_files[i];
+    const char* dst_file = dst_files[i];
+    kvtree_util_set_str(files_hash, src_file, dst_file);
   }
 
   return rc;
@@ -378,7 +491,7 @@ int redset_file_check(kvtree* hash)
 }
 
 /* given a hash that defines a set of files, open our logical file for reading */
-int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rsf)
+int redset_file_open_mapped(const kvtree* hash, const kvtree* map, int flags, mode_t mode, redset_file* rsf)
 {
   int rc = REDSET_SUCCESS;
 
@@ -422,8 +535,19 @@ int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rs
     /* lookup hash for this file */
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
+    /* get name of file we're opening */
+    const char* file_name_mapped = file_name;
+    if (map != NULL) {
+      if (kvtree_util_get_str(map, file_name, &file_name_mapped) != KVTREE_SUCCESS) {
+        /* given a map, but we failed to find this file in the map */
+        redset_abort(-1, "Failed to find `%s' in map @ %s:%d",
+          file_name, __FILE__, __LINE__
+        );
+      }
+    }
+
     /* copy the full filename */
-    filenames[i] = strdup(file_name);
+    filenames[i] = strdup(file_name_mapped);
     if (filenames[i] == NULL) {
       redset_abort(-1, "Failed to copy filename %s @ %s:%d",
         file_name, __FILE__, __LINE__
@@ -442,17 +566,17 @@ int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rs
 
     /* open the file for reading */
     if ((mode & O_RDONLY) == O_RDONLY) {
-      fds[i] = redset_open(file_name, flags);
+      fds[i] = redset_open(file_name_mapped, flags);
       if (fds[i] < 0) {
         redset_abort(-1, "Opening file for reading: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-          file_name, errno, strerror(errno), __FILE__, __LINE__
+          file_name_mapped, errno, strerror(errno), __FILE__, __LINE__
         );
       }
     } else {
-      fds[i] = redset_open(file_name, flags, mode);
+      fds[i] = redset_open(file_name_mapped, flags, mode);
       if (fds[i] < 0) {
         redset_abort(-1, "Opening file for writing: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
-          file_name, errno, strerror(errno), __FILE__, __LINE__
+          file_name_mapped, errno, strerror(errno), __FILE__, __LINE__
         );
       }
     }
@@ -465,6 +589,13 @@ int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rs
   rsf->filenames = filenames;
   rsf->filesizes = filesizes;  
 
+  return rc;
+}
+
+/* given a hash that defines a set of files, open our logical file for reading */
+int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rsf)
+{
+  int rc = redset_file_open_mapped(hash, NULL, flags, mode, rsf);
   return rc;
 }
 
@@ -534,7 +665,7 @@ int redset_file_close(redset_file* rsf)
 }
 
 /* given a hash that defines a set of files, apply metadata recorded to each file */
-int redset_file_apply_meta(kvtree* hash)
+int redset_file_apply_meta_mapped(kvtree* hash, kvtree* map)
 {
   if (hash == NULL) {
     return REDSET_FAILURE;
@@ -563,9 +694,89 @@ int redset_file_apply_meta(kvtree* hash)
     /* lookup hash for this file */
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
+    /* get name of file we're opening */
+    const char* file_name_mapped = file_name;
+    if (map != NULL) {
+      if (kvtree_util_get_str(map, file_name, &file_name_mapped) != KVTREE_SUCCESS) {
+        /* given a map, but we failed to find this file in the map */
+        redset_abort(-1, "Failed to find `%s' in map @ %s:%d",
+          file_name, __FILE__, __LINE__
+        );
+      }
+    }
+
     /* set metadata properties on rebuilt file */
-    redset_meta_apply(file_name, file_hash);
+    redset_meta_apply(file_name_mapped, file_hash);
   }
 
   return rc;
+}
+
+/* given a hash that defines a set of files, apply metadata recorded to each file */
+int redset_file_apply_meta(kvtree* hash)
+{
+  int rc = redset_file_apply_meta_mapped(hash, NULL);
+  return rc;
+}
+
+
+int redset_filelist_release(redset_filelist* plist)
+{
+  if (plist == NULL) {
+    return REDSET_SUCCESS;
+  }
+
+  redset_list* list = (redset_list*) *plist;
+
+  /* check that we got a list */
+  if (list == NULL) {
+    return REDSET_SUCCESS;
+  }
+
+  /* free each file name string */
+  int i;
+  for (i = 0; i < list->count; i++) {
+    redset_free(&list->files[i]);
+  }
+
+  /* free the list of files itself */
+  redset_free(&list->files);
+
+  /* free the object */
+  redset_free(plist);
+
+  return REDSET_SUCCESS;
+}
+
+/* returns the number of files in the list */
+int redset_filelist_count(redset_filelist listvp)
+{
+  redset_list* list = (redset_list*) listvp;
+
+  /* check that we got a list */
+  if (list == NULL) {
+    return 0;
+  }
+
+  return list->count;
+}
+
+/* returns the name of the file by the given index,
+ * index should be between 0 and count-1,
+ * returns NULL if index is invalid */
+const char* redset_filelist_file(redset_filelist listvp, int index)
+{
+  redset_list* list = (redset_list*) listvp;
+
+  /* check that we got a list */
+  if (list == NULL) {
+    return NULL;
+  }
+
+  /* check that index is in range */
+  if (index < 0 || index >= list->count) {
+    return NULL;
+  }
+
+  return list->files[index];
 }
