@@ -8,7 +8,7 @@
 
 ADD_EXECUTABLE(redset_test test_redset.c)
 TARGET_LINK_LIBRARIES(redset_test ${SPATH_EXTERNAL_LIBS} redset)
-ADD_TEST(NAME redset_test COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 2 -N2 ./redset_test)
+ADD_TEST(NAME redset_test COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 3 -N3 ./redset_test)
 
 ####################
 # make a verbose "test" target named "check"
