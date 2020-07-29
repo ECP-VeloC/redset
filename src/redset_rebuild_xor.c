@@ -9,9 +9,6 @@
  * Please also read this file: LICENSE.TXT.
 */
 
-/* Utility to rebuild a missing file given the file names of the
- * remaining N-1 data files and the N-1 XOR segments. */
-
 #include "kvtree.h"
 #include "kvtree_util.h"
 
@@ -392,7 +389,7 @@ int redset_rebuild(
 
   int rc = 0;
 
-  // sort header before writing
+  /* sort header before writing */
   redset_sort_kvtree(xor_headers[0]);
 
   /* write the header to the XOR file of the missing rank */
@@ -450,46 +447,6 @@ int redset_rebuild(
   return rc;
 }
 
-#if 0
-int redset_filelist_release(redset_filelist* plist)
-{
-  return 0;
-}
-
-/* returns the number of files in the list */
-int redset_filelist_count(redset_filelist listvp)
-{
-  redset_list* list = (redset_list*) listvp;
-
-  /* check that we got a list */
-  if (list == NULL) {
-    return 0;
-  }
-
-  return list->count;
-}
-
-/* returns the name of the file by the given index,
- * index should be between 0 and count-1,
- * returns NULL if index is invalid */
-const char* redset_filelist_file(redset_filelist listvp, int index)
-{
-  redset_list* list = (redset_list*) listvp;
-
-  /* check that we got a list */
-  if (list == NULL) {
-    return NULL;
-  }
-
-  /* check that index is in range */
-  if (index < 0 || index >= list->count) {
-    return NULL;
-  }
-
-  return list->files[index];
-}
-#endif
-
 redset_filelist redset_filelist_get_data(
   int num,
   const char** files)
@@ -502,10 +459,8 @@ redset_filelist redset_filelist_get_data(
   for (i = 0; i < num; i++) {
     /* open the current file */
     const char* file = files[i];
-    //int fd = redset_open(file, O_RDONLY);
     int fd = redset_open(file, O_RDONLY);
     if (fd < 0) {
-      //redset_err("Opening XOR file for reading: redset_open(%s) errno=%d %s @ %s:%d",
       redset_err("Opening XOR file for reading: redset_open(%s) errno=%d %s @ %s:%d",
         file, errno, strerror(errno), __FILE__, __LINE__
       );
@@ -523,7 +478,6 @@ redset_filelist redset_filelist_get_data(
       kvtree_util_get_int(group_hash, REDSET_KEY_COPY_XOR_GROUP_RANKS, &total_ranks);
 
       /* allocate a spot to hold the file info for each member */
-      //current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
       current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
 
       /* initialize all spots to NULL so we know whether we've already read it in */
@@ -567,11 +521,9 @@ redset_filelist redset_filelist_get_data(
   }
 
   /* allocate a list to hold files for all ranks */
-  //redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
   redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
 
   list->count = total_files;
-  //list->files = (const char**) REDSET_MALLOC(total_files * sizeof(char*));
   list->files = (const char**) REDSET_MALLOC(total_files * sizeof(char*));
 
   int idx = 0;
@@ -611,7 +563,7 @@ void redset_lookup_ranks(
 {
   /* open the first file we're given */
   const char* file = files[0];
-  int fd = open(file, O_RDONLY);
+  int fd = redset_open(file, O_RDONLY);
   if (fd < 0) {
   }
 
@@ -632,7 +584,7 @@ void redset_lookup_ranks(
 
   kvtree_delete(&header);
 
-  close(fd);
+  redset_close(file, fd);
 
   return;
 }
