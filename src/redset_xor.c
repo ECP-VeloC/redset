@@ -32,10 +32,8 @@ static void redset_build_xor_filename(
   char* file, 
   size_t len)
 {
-  int parent_rank;
-  MPI_Comm_rank(d->parent_comm, &parent_rank);
-  snprintf(file, len, "%s.xor.grp_%d_of_%d.mem_%d_of_%d.%d.redset",
-    name, d->group_id+1, d->groups, d->rank+1, d->ranks, parent_rank
+  snprintf(file, len, "%s.xor.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, d->group_id+1, d->groups, d->rank+1, d->ranks
   );
 }
 
@@ -85,11 +83,6 @@ int redset_construct_xor(MPI_Comm parent_comm, redset_base* d)
 
   /* allocate a new hash to store group mapping info */
   kvtree* header = kvtree_new();
-
-  /* record our global rank in parent comm */
-  int parent_rank;
-  MPI_Comm_rank(parent_comm, &parent_rank);
-  kvtree_set_kv_int(header, REDSET_KEY_COPY_XOR_GROUP_RANK, d->rank);
 
   /* create a new empty hash to track group info for this xor set */
   kvtree* hash = kvtree_new();
@@ -239,13 +232,20 @@ int redset_apply_xor(
   redset_store_to_kvtree(d, desc_hash);
   kvtree_set(current_hash, REDSET_KEY_COPY_XOR_DESC, desc_hash);
 
+  /* create a hash to define our header information */
+  kvtree* header = kvtree_new();
+
+  /* record our rank within our redundancy group */
+  kvtree_set_kv_int(header, REDSET_KEY_COPY_XOR_GROUP_RANK, d->rank);
+
+  /* copy meta data to hash */
+  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+
   /* exchange meta data with partner */
   kvtree* partner_hash = kvtree_new();
   kvtree_sendrecv(current_hash, state->rhs_rank, partner_hash, state->lhs_rank, comm);
 
-  /* copy meta data to hash */
-  kvtree* header = kvtree_new();
-  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+  /* copy meta data for partner to our left */
   kvtree_setf(header, partner_hash, "%s %d", REDSET_KEY_COPY_XOR_DESC, state->lhs_rank);
 
   /* record the global ranks of the processes in our xor group */

@@ -17,6 +17,7 @@
 #include "redset.h"
 #include "redset_internal.h"
 
+#define REDSET_KEY_COPY_RS_DESC  "DESC"
 #define REDSET_KEY_COPY_RS_CHUNK "CHUNK"
 #define REDSET_KEY_COPY_RS_CKSUM "CKSUM"
 
@@ -33,7 +34,9 @@ static void redset_build_rs_filename(
   char* file, 
   size_t len)
 {
-  snprintf(file, len, "%s.rs.%d_%d_of_%d.redset", name, d->group_id, d->rank+1, d->ranks);
+  snprintf(file, len, "%s.rs.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, d->group_id+1, d->groups, d->rank+1, d->ranks
+  );
 }
 
 /* returns true if a an RS file is found for this rank,
@@ -763,11 +766,6 @@ int redset_construct_rs(MPI_Comm parent_comm, redset_base* d, int encoding)
   /* allocate a new hash to store group mapping info */
   kvtree* header = kvtree_new();
 
-  /* record the total number of ranks in parent comm */
-  int parent_ranks;
-  MPI_Comm_size(parent_comm, &parent_ranks);
-  kvtree_set_kv_int(header, REDSET_KEY_COPY_RS_RANKS, parent_ranks);
-
   /* create a new empty hash to track group info for this xor set */
   kvtree* hash = kvtree_new();
   kvtree_set(header, REDSET_KEY_COPY_RS_GROUP, hash);
@@ -1107,13 +1105,16 @@ int redset_apply_rs(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
-  kvtree_set(current_hash, "DESC", desc_hash);
+  kvtree_set(current_hash, REDSET_KEY_COPY_RS_DESC, desc_hash);
 
   /* create a hash to define our header information */
   kvtree* header = kvtree_new();
 
+  /* record our rank within our redundancy group */
+  kvtree_set_kv_int(header, REDSET_KEY_COPY_RS_GROUP_RANK, d->rank);
+
   /* copy meta data to hash */
-  kvtree_setf(header, current_hash, "%d", d->rank);
+  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
 
   /* copy our descriptor N times to other ranks so it can be recovered
    * with to the same degree as our encoding scheme */
@@ -1128,7 +1129,7 @@ int redset_apply_rs(
     kvtree_sendrecv(current_hash, rhs_rank, partner_hash, lhs_rank, comm);
 
     /* attach hash from this neighbor to our header */
-    kvtree_setf(header, partner_hash, "%d", lhs_rank);
+    kvtree_setf(header, partner_hash, "%s %d", REDSET_KEY_COPY_RS_DESC, lhs_rank);
   }
 
   /* record the global ranks of the processes in our redundancy group */
@@ -1404,7 +1405,7 @@ int redset_recover_rs_rebuild(
     header_size = lseek(fd_chunk, 0, SEEK_CUR);
 
     /* get file info for this rank */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
 
     /* lookup number of files this process wrote */
     if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
@@ -1447,9 +1448,13 @@ int redset_recover_rs_rebuild(
     kvtree_delete(&send_hash);
 
     /* get our current hash from header we received */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
+
+    /* replace the rank id with our own */
+    kvtree_util_set_int(header, REDSET_KEY_COPY_RS_GROUP_RANK, d->rank);
 
     /* unset descriptors for ranks other than our partners */
+    desc_hash = kvtree_get(header, REDSET_KEY_COPY_RS_DESC);
     for (i = 0; i < state->encoding; i++) {
       /* step through entries the source rank would have */
       int lhs_rank = (source_rank - i + d->ranks) % d->ranks;
@@ -1465,7 +1470,7 @@ int redset_recover_rs_rebuild(
       snprintf(rankstr, sizeof(rankstr), "%d", lhs_rank);
 
       /* now we can delete this entry */
-      kvtree_unset(header, rankstr);
+      kvtree_unset(desc_hash, rankstr);
     }
 
     /* get permissions for file */
@@ -1521,11 +1526,8 @@ int redset_recover_rs_rebuild(
       kvtree* partner_hash = kvtree_new();
       kvtree_merge(partner_hash, desc_hash);
 
-      /* delete any existing entry */
-      kvtree_unset(header, rank_key);
-
       /* attach the copy to our header */
-      kvtree_set(header, rank_key, partner_hash);
+      kvtree_setf(header, partner_hash, "%s %s", REDSET_KEY_COPY_RS_DESC, rank_key);
     }
 
     /* sort the header to list items alphabetically,
@@ -1819,7 +1821,7 @@ int redset_recover_rs(
   kvtree* header = kvtree_new();
   if (redset_read_rs_file(name, d, header) == REDSET_SUCCESS) {
     /* got our chunk file, see if we have each data file */
-    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       need_rebuild = 1;

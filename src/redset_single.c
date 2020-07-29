@@ -30,6 +30,9 @@
  * are checked against the specified files.
  */
 
+#define REDSET_KEY_COPY_SINGLE_DESC "DESC"
+#define REDSET_KEY_COPY_SINGLE_GROUP_RANK  "RANK"
+
 /* set single filename */
 static void redset_build_single_filename(
   const char* name,
@@ -37,7 +40,9 @@ static void redset_build_single_filename(
   char* file, 
   size_t len)
 {
-  snprintf(file, len, "%s.single.redset", name);
+  snprintf(file, len, "%s.single.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, d->group_id+1, d->groups, d->rank+1, d->ranks
+  );
 }
 
 /* returns 1 if we successfully read redundancy file, 0 otherwise */
@@ -90,23 +95,33 @@ int redset_apply_single(
   /* encode file info into hash */
   redset_file_encode_kvtree(current_hash, numfiles, files);
 
-  /* copy meta data to hash */
-  kvtree* meta_hash = kvtree_new();
-  kvtree_setf(meta_hash, current_hash, "%d", d->rank);
+  /* store our redundancy descriptor in hash */
+  kvtree* desc_hash = kvtree_new();
+  redset_store_to_kvtree(d, desc_hash);
+  kvtree_set(current_hash, REDSET_KEY_COPY_SINGLE_DESC, desc_hash);
+
+  /* define header we'll write to our redundancy file */
+  kvtree* header = kvtree_new();
+
+  /* record our rank within our redundancy group */
+  kvtree_set_kv_int(header, REDSET_KEY_COPY_SINGLE_GROUP_RANK, d->rank);
+
+  /* record our redundancy descriptor and file info */
+  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_SINGLE_DESC, d->rank);
 
   /* sort the header to list items alphabetically,
    * this isn't strictly required, but it ensures the kvtrees
    * are stored in the same byte order so that we can reproduce
    * the redundancy file identically on a rebuild */
-  redset_sort_kvtree(meta_hash);
+  redset_sort_kvtree(header);
 
-  /* write meta data to file in directory */
+  /* define file name for our redudancy file */
   char filename[REDSET_MAX_FILENAME];
   redset_build_single_filename(name, d, filename, sizeof(filename));
-  kvtree_write_file(filename, meta_hash);
 
-  /* delete the hash */
-  kvtree_delete(&meta_hash);
+  /* write the redundancy file */
+  kvtree_write_file(filename, header);
+  kvtree_delete(&header);
 
   return REDSET_SUCCESS;
 }
@@ -126,7 +141,7 @@ int redset_recover_single(
   kvtree* header = kvtree_new();
   if (redset_read_single_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
-    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_SINGLE_DESC, d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       have_my_files = 0;
