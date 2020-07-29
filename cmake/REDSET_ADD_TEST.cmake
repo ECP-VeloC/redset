@@ -4,7 +4,7 @@ function(REDSET_ADD_TEST name args outputs)
   if(${VELOC_RESOURCE_MANAGER} STREQUAL "LSF")
     set(test_param jsrun -r 1)
   elseif(${VELOC_RESOURCE_MANAGER} STREQUAL "SLURM")
-    set(test_param srun -N 3 -n 6)
+    set(test_param srun -N 3 -n 3)
   endif()
 
   # Tests
