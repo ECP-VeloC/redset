@@ -20,6 +20,9 @@ depsdir=`pwd`
 if [ ! -d KVTree ] ; then
   git clone git@github.com:ECP-Veloc/KVTree.git KVTree
 fi
+if [ ! -d rankstr ] ; then
+  git clone git@github.com:ECP-Veloc/rankstr.git rankstr
+fi
 
 rm -rf KVTree/build
 mkdir KVTree/build
@@ -29,5 +32,17 @@ cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-O0" -DCMAKE_INSTALL_PREFIX=$ins
 make clean
 make
 make install
+cd $depsdir
+
+rm -rf rankstr/build
+mkdir rankstr/build
+
+# rankstr
+cd rankstr/build
+cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-O0" -DCMAKE_INSTALL_PREFIX=$installdir -DMPI=ON ..
+make clean
+make
+make install
+#make test
 cd $depsdir
 
