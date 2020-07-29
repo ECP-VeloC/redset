@@ -8,6 +8,6 @@ function(REDSET_ADD_TEST name args outputs)
   endif()
 
   # Tests
-  add_test(NAME serial_${name}_start COMMAND ${test_param} ./${name} ${args} )
+  add_test(NAME ${name} COMMAND ${test_param} ./${name} ${args} )
 
 endfunction(REDSET_ADD_TEST)
