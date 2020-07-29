@@ -1,16 +1,3 @@
-/* to get nsec fields in stat structure */
-#define _GNU_SOURCE
-
-/* TODO: ugly hack until we get a configure test */
-#if defined(__APPLE__)
-#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
-#else
-#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
-#endif
-// HAVE_STRUCT_STAT_ST_MTIME_N
-// HAVE_STRUCT_STAT_ST_UMTIME
-// HAVE_STRUCT_STAT_ST_MTIME_USEC
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -194,6 +181,8 @@ int redset_delete(redset* dvp)
 #define REDSET_KEY_CONFIG_GROUP_ID   "GROUP"
 #define REDSET_KEY_CONFIG_GROUP_SIZE "RANKS"
 #define REDSET_KEY_CONFIG_GROUP_RANK "RANK"
+#define REDSET_KEY_CONFIG_WORLD_SIZE "WRANKS"
+#define REDSET_KEY_CONFIG_WORLD_RANK "WRANK"
 
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
@@ -415,15 +404,6 @@ static int redset_create_base(
   MPI_Comm_rank(d->comm, &d->rank);
   MPI_Comm_size(d->comm, &d->ranks);
 
-#if 0
-  /* for our group id, use the global rank of the rank 0 task
-   * in our reddesc comm */
-  int comm_rank;
-  MPI_Comm_rank(comm, &comm_rank);
-  d->group_id = comm_rank;
-  MPI_Bcast(&d->group_id, 1, MPI_INT, 0, d->comm);
-#endif
-
   /* count the number of groups */
   int group_leader = (d->rank == 0) ? 1 : 0;
   MPI_Allreduce(&group_leader, &d->groups, 1, MPI_INT, MPI_SUM, comm);
@@ -569,6 +549,13 @@ int redset_store_to_kvtree(const redset_base* d, kvtree* hash)
   kvtree_set_kv_int(hash, REDSET_KEY_CONFIG_GROUP_ID,   d->group_id);
   kvtree_set_kv_int(hash, REDSET_KEY_CONFIG_GROUP_SIZE, d->ranks);
   kvtree_set_kv_int(hash, REDSET_KEY_CONFIG_GROUP_RANK, d->rank);
+
+  /* store our global rank and size */
+  int rank, ranks;
+  MPI_Comm_rank(d->parent_comm, &rank);  
+  MPI_Comm_size(d->parent_comm, &ranks);  
+  kvtree_set_kv_int(hash, REDSET_KEY_CONFIG_WORLD_RANK, rank);
+  kvtree_set_kv_int(hash, REDSET_KEY_CONFIG_WORLD_SIZE, ranks);
 
   return REDSET_SUCCESS;
 }

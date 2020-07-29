@@ -17,6 +17,9 @@
 #include "redset.h"
 #include "redset_internal.h"
 
+#define REDSET_KEY_COPY_PARTNER_DESC "DESC"
+#define REDSET_KEY_COPY_PARTNER_GROUP_RANK "RANK"
+
 /* set partner filename */
 static void redset_build_partner_filename(
   const char* name,
@@ -28,7 +31,9 @@ static void redset_build_partner_filename(
   int rank;
   MPI_Comm_rank(d->comm, &rank);
   redset_partner* state = (redset_partner*) d->state;
-  snprintf(file, len, "%s.partner.%d_%d_%d.redset", name, state->lhs_rank_world, rank, state->rhs_rank_world);
+  snprintf(file, len, "%s.partner.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, d->group_id+1, d->groups, d->rank+1, d->ranks
+  );
 }
 
 /* returns 1 if we successfully read a partner file, 0 otherwise */
@@ -234,13 +239,16 @@ int redset_apply_partner(
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
   redset_store_to_kvtree(d, desc_hash);
-  kvtree_set(current_hash, "DESC", desc_hash);
+  kvtree_set(current_hash, REDSET_KEY_COPY_PARTNER_DESC, desc_hash);
 
   /* copy meta data to hash */
   kvtree* header = kvtree_new();
 
+  /* record our rank within our redundancy group */
+  kvtree_set_kv_int(header, REDSET_KEY_COPY_PARTNER_GROUP_RANK, d->rank);
+
   /* copy meta data to hash */
-  kvtree_setf(header, current_hash, "%d", d->rank);
+  kvtree_setf(header, current_hash, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
 
   /* copy our descriptor N times to other ranks so it can be recovered
    * with to the same degree as our encoding scheme */
@@ -255,14 +263,14 @@ int redset_apply_partner(
     kvtree_sendrecv(current_hash, rhs_rank, partner_hash, lhs_rank, comm);
 
     /* attach hash from this neighbor to our header */
-    kvtree_setf(header, partner_hash, "%d", lhs_rank);
+    kvtree_setf(header, partner_hash, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, lhs_rank);
   }
 
-  /* write meta data to file */
+  /* define file name for our redundancy file */
   char partner_file[REDSET_MAX_FILENAME];
   redset_build_partner_filename(name, d, partner_file, sizeof(partner_file));
 
-  /* open my partner file */
+  /* open the redundancy file */
   mode_t mode_file = redset_getmode(1, 1, 0);
   int fd_partner = redset_open(partner_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
   if (fd_partner < 0) {
@@ -566,7 +574,7 @@ int redset_recover_partner_rebuild(
     header_size = lseek(fd_partner, 0, SEEK_CUR);
 
     /* get file info for this rank */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
 
     /* open our logical file for reading */
     if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
@@ -606,10 +614,14 @@ int redset_recover_partner_rebuild(
     kvtree_delete(&recv_hash);
     kvtree_delete(&send_hash);
 
+    /* overwrite rank of partner with our own rank in the redundancy group */
+    kvtree_set_kv_int(header, REDSET_KEY_COPY_PARTNER_GROUP_RANK, d->rank);
+
     /* get our current hash from header we received */
-    current_hash = kvtree_getf(header, "%d", d->rank);
+    current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
 
     /* unset descriptors for ranks other than our partners */
+    desc_hash = kvtree_get(header, REDSET_KEY_COPY_PARTNER_DESC);
     for (i = 0; i <= state->replicas; i++) {
       /* step through entries the source rank would have */
       int lhs_rank = (source_rank - i + d->ranks) % d->ranks;
@@ -625,7 +637,7 @@ int redset_recover_partner_rebuild(
       snprintf(rankstr, sizeof(rankstr), "%d", lhs_rank);
 
       /* now we can delete this entry */
-      kvtree_unset(header, rankstr);
+      kvtree_unset(desc_hash, rankstr);
     }
 
     /* get permissions for file */
@@ -679,11 +691,8 @@ int redset_recover_partner_rebuild(
       kvtree* partner_hash = kvtree_new();
       kvtree_merge(partner_hash, desc_hash);
 
-      /* delete any existing entry */
-      kvtree_unset(header, rank_key);
-
       /* attach the copy to our header */
-      kvtree_set(header, rank_key, partner_hash);
+      kvtree_setf(header, partner_hash, "%s %s", REDSET_KEY_COPY_PARTNER_DESC, rank_key);
     }
 
     /* sort the header to list items alphabetically,
@@ -992,7 +1001,7 @@ int redset_recover_partner(
   kvtree* header = kvtree_new();
   if (redset_read_partner_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
-    kvtree* current_hash = kvtree_getf(header, "%d", d->rank);
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
     if (redset_file_check(current_hash) != REDSET_SUCCESS) {
       have_my_files = 0;
     }
