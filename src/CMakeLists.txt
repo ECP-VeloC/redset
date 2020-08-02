@@ -16,6 +16,7 @@ LIST(APPEND cliredset_noMPI_srcs
     redset_util.c
     redset_io.c
     redset_rebuild_xor.c
+    redset_rebuild_partner.c
 )
 
 LIST(APPEND libredset_srcs
