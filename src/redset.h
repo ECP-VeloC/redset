@@ -164,13 +164,16 @@ int redset_file_encode_kvtree(kvtree* hash, int num, const char** files);
 int redset_file_encode_map(kvtree* hash, int num, const char** src_files, const char** dst_files);
 
 /* check whether files in kvtree exist and match expected properties */
-int redset_file_check(kvtree* hash);
+int redset_file_check_mapped(const kvtree* hash, const kvtree* map);
 
-/* given a hash that defines a set of files, open our logical file for reading */
-int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rsf);
+/* check whether files in kvtree exist and match expected properties */
+int redset_file_check(const kvtree* hash);
 
 /* given a hash that defines a set of files, open our logical file for reading */
 int redset_file_open_mapped(const kvtree* hash, const kvtree* map, int flags, mode_t mode, redset_file* rsf);
+
+/* given a hash that defines a set of files, open our logical file for reading */
+int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rsf);
 
 /* return file size of our logical file */
 unsigned long redset_file_bytes(redset_file* rsf);
