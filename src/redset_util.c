@@ -421,7 +421,7 @@ int redset_file_encode_map(kvtree* hash, int num, const char** src_files, const 
   return rc;
 }
 
-int redset_file_check(kvtree* hash)
+int redset_file_check_mapped(const kvtree* hash, const kvtree* map)
 {
   int rc = REDSET_SUCCESS;
 
@@ -457,15 +457,26 @@ int redset_file_check(kvtree* hash)
       continue;
     }
   
+    /* get name of file we're opening */
+    const char* file_name_mapped = file;
+    if (map != NULL) {
+      if (kvtree_util_get_str(map, file, &file_name_mapped) != KVTREE_SUCCESS) {
+        /* given a map, but we failed to find this file in the map */
+        redset_abort(-1, "Failed to find `%s' in map @ %s:%d",
+          file, __FILE__, __LINE__
+        );
+      }
+    }
+
     /* check that file exists */
-    if (redset_file_exists(file) != REDSET_SUCCESS) {
+    if (redset_file_exists(file_name_mapped) != REDSET_SUCCESS) {
       /* failed to find file */
       have_my_files = 0;
       continue;
     }
   
     /* get file size of this file */
-    unsigned long file_size = redset_file_size(file);
+    unsigned long file_size = redset_file_size(file_name_mapped);
   
     /* lookup expected file size and compare to actual size */
     unsigned long file_size_saved;
@@ -487,6 +498,12 @@ int redset_file_check(kvtree* hash)
     rc = REDSET_FAILURE;
   }
 
+  return rc;
+}
+
+int redset_file_check(const kvtree* hash)
+{
+  int rc = redset_file_check_mapped(hash, NULL);
   return rc;
 }
 
