@@ -204,7 +204,7 @@ static int redset_recover_xor_rebuild_serial(
   return rc;
 }
 
-int redset_rebuild(
+int redset_rebuild_xor(
   int xor_set_size,
   int root,
   const char** existing_files,
@@ -447,7 +447,7 @@ int redset_rebuild(
   return rc;
 }
 
-redset_filelist redset_filelist_get_data(
+redset_filelist redset_filelist_get_data_xor(
   int num,
   const char** files)
 {
@@ -555,7 +555,7 @@ redset_filelist redset_filelist_get_data(
   return list;
 }
 
-void redset_lookup_ranks(
+void redset_lookup_ranks_xor(
   int num,
   const char** files,
   int* global_ranks,
@@ -588,98 +588,3 @@ void redset_lookup_ranks(
 
   return;
 }
-
-#if 0
-int rebuild(const spath* path_prefix, int build_data, int index, const char* argv[])
-{
-  int i, j;
-
-  int rc = 0;
-
-  /* read in the size of the redundancy set */
-  int set_size = (int) strtol(argv[index++], (char **)NULL, 10);
-  if (set_size <= 0) {
-    redset_err("Invalid set size argument %s @ %s:%d",
-      argv[index-1], __FILE__, __LINE__
-    );
-    return 1;
-  }
-
-  /* read in the rank of the missing process (the root) */
-  int root = (int) strtol(argv[index++], (char **)NULL, 10);
-  if (root < 0 || root >= set_size) {
-    redset_err("Invalid root argument %s @ %s:%d",
-      argv[index-1], __FILE__, __LINE__
-    );
-    return 1;
-  }
-
-  /* allocate memory for data structures based on the set size */
-  int* ranks = REDSET_MALLOC(set_size * sizeof(int*));
-  if (ranks == NULL) {
-    redset_err("Failed to allocate array for rank list @ %s:%d",
-      __FILE__, __LINE__
-    );
-    return 1;
-  }
-
-  /* get list of global rank ids in set, and id of missing rank */
-  int missing = root;
-  redset_lookup_ranks(set_size, &argv[index], ranks, &missing);
-
-  /* define name for missing XOR file */
-  spath* file_prefix = spath_dup(path_prefix);
-  kvtree* map = kvtree_new();
-  if (build_data) {
-    spath_append_str(file_prefix, "reddesc.er.");
-    build_map_data(path_prefix, set_size, ranks, missing, map);
-  } else {
-    spath_append_str(file_prefix, "reddescmap.er.");
-    build_map_filemap(path_prefix, set_size, &argv[index], ranks, missing, map);
-  }
-  char* prefix = spath_strdup(file_prefix);
-  spath_delete(&file_prefix);
-
-  redset_rebuild(set_size, root, &argv[index], prefix, map);
-
-  redset_free(&prefix);
-  kvtree_delete(&map);
-
-  redset_free(&ranks);
-
-  return rc;
-}
-
-int main(int argc, char* argv[])
-{
-  int i, j;
-  int index = 1;
-
-  /* print usage if not enough arguments were given */
-  if (argc < 2) {
-    printf("Usage: redset_rebuild_xor <xor|map> <size> <root> <ordered_remaining_xor_filenames>\n");
-    return 1;
-  }
-
-  /* TODO: want to pass this on command line? */
-  /* get current working directory */
-  char dsetdir[REDSET_MAX_FILENAME];
-  redset_getcwd(dsetdir, sizeof(dsetdir));
-
-  /* create and reduce path for dataset */
-  spath* path_prefix = spath_from_str(dsetdir);
-  spath_reduce(path_prefix);
-
-  /* rebuild filemaps if given map command */
-  int rc = 1;
-  if (strcmp(argv[index++], "map") == 0) {
-    rc = rebuild(path_prefix, 0, index, (const char**)argv);
-  } else {
-    rc = rebuild(path_prefix, 1, index, (const char**)argv);
-  }
-
-  spath_delete(&path_prefix);
-
-  return rc;
-}
-#endif
