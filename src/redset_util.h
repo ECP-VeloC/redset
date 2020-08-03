@@ -69,40 +69,4 @@ void** redset_buffers_alloc(int num, size_t size);
 /* free a set of buffers allocated in redset_buffers_alloc */
 void redset_buffers_free(int num, void* pbufs);
 
-#if 0
-/* structure to track an ordered set of files and operate on
- * them as one logical, continuous file */
-typedef struct {
-  int numfiles;             /* number of files in list */
-  off_t bytes;              /* number of bytes summed across all files */
-  int* fds;                 /* file descriptor for each file */
-  const char** filenames;   /* name of each file */
-  unsigned long* filesizes; /* size of each file */
-} redset_file;
-
-/* encode file info into kvtree */
-int redset_file_encode_kvtree(kvtree* hash, int num, const char** files);
-
-/* check whether files in kvtree exist and match expected properties */
-int redset_file_check(kvtree* hash);
-
-/* given a hash that defines a set of files, open our logical file for reading */
-int redset_file_open(const kvtree* hash, int flags, mode_t mode, redset_file* rsf);
-
-/* return file size of our logical file */
-unsigned long redset_file_bytes(redset_file* rsf);
-
-/* read from logical file */
-int redset_file_pread(redset_file* rsf, void* buf, size_t count, off_t offset);
-
-/* write to logical file */
-int redset_file_pwrite(redset_file* rsf, void* buf, size_t count, off_t offset);
-
-/* given a hash that defines a set of files, close our logical */
-int redset_file_close(redset_file* rsf);
-
-/* given a hash that defines a set of files, apply metadata recorded to each file */
-int redset_file_apply_meta(kvtree* hash);
-#endif
-
 #endif

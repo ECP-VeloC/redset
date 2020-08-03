@@ -171,7 +171,7 @@ static int redset_recover_partner_rebuild_serial_redundancy(
   off_t header_size,
   int replicas,
   int total_ranks,
-  redset_file* rsfs)
+  redset_lofi* rsfs)
 {
   int rc = 0;
 
@@ -201,7 +201,7 @@ static int redset_recover_partner_rebuild_serial_redundancy(
 
     /* copy data from this partner into our partner file */
     unsigned long pos = 0;
-    unsigned long bytes = redset_file_bytes(&rsfs[lhs_rank]);
+    unsigned long bytes = redset_lofi_bytes(&rsfs[lhs_rank]);
     while (pos < bytes && rc == REDSET_SUCCESS) {
       /* read upto buffer_size bytes at a time */
       size_t count = bytes - pos;
@@ -211,7 +211,7 @@ static int redset_recover_partner_rebuild_serial_redundancy(
   
       /* at this point, we have the data from the missing rank, write it out */
       /* write chunk to logical file for the missing rank */
-      if (redset_file_pread(&rsfs[lhs_rank], buffer, count, pos) != REDSET_SUCCESS)
+      if (redset_lofi_pread(&rsfs[lhs_rank], buffer, count, pos) != REDSET_SUCCESS)
       {
         /* our write failed, set the return code to an error */
         rc = REDSET_FAILURE;
@@ -240,7 +240,7 @@ static int redset_recover_partner_rebuild_serial(
   int fd,
   off_t header_size,
   int total_ranks,
-  redset_file* rsfs)
+  redset_lofi* rsfs)
 {
   int rc = 0;
 
@@ -271,7 +271,7 @@ static int redset_recover_partner_rebuild_serial(
 
     /* this data is for a rank other than the one we're rebuilding,
      * skip over it */
-    unsigned long bytes = redset_file_bytes(&rsfs[lhs_rank]);
+    unsigned long bytes = redset_lofi_bytes(&rsfs[lhs_rank]);
     offset += bytes;
   }
 
@@ -281,7 +281,7 @@ static int redset_recover_partner_rebuild_serial(
   }
 
   unsigned long write_pos = 0;
-  unsigned long bytes = redset_file_bytes(&rsfs[missing_rank]);
+  unsigned long bytes = redset_lofi_bytes(&rsfs[missing_rank]);
   while (write_pos < bytes && rc == REDSET_SUCCESS) {
     /* read upto buffer_size bytes at a time */
     size_t count = bytes - write_pos;
@@ -299,7 +299,7 @@ static int redset_recover_partner_rebuild_serial(
 
     /* at this point, we have the data from the missing rank, write it out */
     /* write chunk to logical file for the missing rank */
-    if (redset_file_pwrite(&rsfs[missing_rank], buffer, count, write_pos) != REDSET_SUCCESS)
+    if (redset_lofi_pwrite(&rsfs[missing_rank], buffer, count, write_pos) != REDSET_SUCCESS)
     {
       /* our write failed, set the return code to an error */
       rc = REDSET_FAILURE;
@@ -325,7 +325,7 @@ int redset_rebuild_partner(
 
   int* missing            = NULL;
   kvtree** current_hashes = NULL;
-  redset_file* rsfs       = NULL;
+  redset_lofi* rsfs       = NULL;
   char** filenames        = NULL;
   int* fds                = NULL;
   off_t* header_sizes     = NULL;
@@ -368,7 +368,7 @@ int redset_rebuild_partner(
       current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
 
       /* allocate a logical file for each member */
-      rsfs = (redset_file*) REDSET_MALLOC(total_ranks * sizeof(redset_file));
+      rsfs = (redset_lofi*) REDSET_MALLOC(total_ranks * sizeof(redset_lofi));
 
       /* allocate an array to hold strdup of name of each redundancy file */
       filenames = (char**) REDSET_MALLOC(total_ranks * sizeof(char*));
@@ -422,7 +422,7 @@ int redset_rebuild_partner(
   /* check that we can identify set of files for all procs in the set */
   for (i = 0; i < total_ranks; i++) {
     const kvtree* current_hash = current_hashes[i];
-    if (redset_file_check_mapped(current_hash, map) != REDSET_SUCCESS) {
+    if (redset_lofi_check_mapped(current_hash, map) != REDSET_SUCCESS) {
       missing[i] = 1;
     }
   }
@@ -451,7 +451,7 @@ int redset_rebuild_partner(
     if (missing[i]) {
       /* open our data files for writing */
       mode_t mode_file = redset_getmode(1, 1, 0);
-      if (redset_file_open_mapped(current_hash, map, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsfs[i]) != REDSET_SUCCESS) {
+      if (redset_lofi_open_mapped(current_hash, map, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsfs[i]) != REDSET_SUCCESS) {
         redset_err("Opening user data files for writing @ %s:%d",
           __FILE__, __LINE__
         );
@@ -468,7 +468,7 @@ int redset_rebuild_partner(
       }
     } else {
       /* we have these user data files, open them for reading */
-      if (redset_file_open_mapped(current_hash, map, O_RDONLY, (mode_t)0, &rsfs[i]) != REDSET_SUCCESS) {
+      if (redset_lofi_open_mapped(current_hash, map, O_RDONLY, (mode_t)0, &rsfs[i]) != REDSET_SUCCESS) {
         redset_err("Opening user data files for reading @ %s:%d",
           __FILE__, __LINE__
         );
@@ -559,7 +559,7 @@ int redset_rebuild_partner(
 
   /* close data files */
   for (i = 0; i < total_ranks; i++) {
-    redset_file_close(&rsfs[i]);
+    redset_lofi_close(&rsfs[i]);
   }
 
   /* close partner files */
@@ -574,7 +574,7 @@ int redset_rebuild_partner(
   if (rc == REDSET_SUCCESS) {
     for (i = 0; i < total_ranks; i++) {
       if (missing[i]) {
-        int apply_rc = redset_file_apply_meta_mapped(current_hashes[i], map);
+        int apply_rc = redset_lofi_apply_meta_mapped(current_hashes[i], map);
         if (apply_rc != REDSET_SUCCESS) {
         }
       }

@@ -2,7 +2,11 @@
 #define REDSET_INTERNAL_H
 
 #include "kvtree.h"
+
 #include "redset.h"
+#include "redset_io.h"
+#include "redset_util.h"
+#include "redset_lofi.h"
 
 #define REDSET_VERSION "1.0"
 

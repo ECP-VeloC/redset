@@ -226,11 +226,11 @@ int redset_apply_partner(
   kvtree* current_hash = kvtree_new();
 
   /* record info about our data files */
-  redset_file_encode_kvtree(current_hash, numfiles, files);
+  redset_lofi_encode_kvtree(current_hash, numfiles, files);
 
   /* open our logical file for reading */
-  redset_file rsf;
-  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+  redset_lofi rsf;
+  if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
     redset_abort(-1, "Opening data files for copying: @ %s:%d",
       __FILE__, __LINE__
     );
@@ -300,7 +300,7 @@ int redset_apply_partner(
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
   /* number of bytes summed across all of our files */
-  unsigned long outgoing = redset_file_bytes(&rsf);
+  unsigned long outgoing = redset_lofi_bytes(&rsf);
 
   /* determine how many bytes are coming from each of our partners */
   unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
@@ -372,7 +372,7 @@ int redset_apply_partner(
 
     /* read data from files */
     if (send_count > 0) {
-      if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
+      if (redset_lofi_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
       {
         rc = REDSET_FAILURE;
       }
@@ -439,7 +439,7 @@ int redset_apply_partner(
   }
 
   /* close my data files */
-  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+  if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -537,7 +537,7 @@ int redset_recover_partner_rebuild(
     return REDSET_FAILURE;
   }
 
-  redset_file rsf;
+  redset_lofi rsf;
   int fd_partner = -1;
 
   kvtree* send_hash = NULL;
@@ -577,7 +577,7 @@ int redset_recover_partner_rebuild(
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
 
     /* open our logical file for reading */
-    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files to read for rebuild: %s @ %s:%d",
         partner_file, __FILE__, __LINE__
       );
@@ -644,7 +644,7 @@ int redset_recover_partner_rebuild(
     mode_t mode_file = redset_getmode(1, 1, 0);
 
     /* open our logical file for writing */
-    if (redset_file_open(current_hash, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_RDWR | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
         __FILE__, __LINE__
       );
@@ -718,7 +718,7 @@ int redset_recover_partner_rebuild(
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->replicas, redset_mpi_buf_size);
 
   /* get file size of our logical file */
-  unsigned long bytes = redset_file_bytes(&rsf);
+  unsigned long bytes = redset_lofi_bytes(&rsf);
 
   unsigned long outgoing = bytes;
   unsigned long* incoming = (unsigned long*) REDSET_MALLOC(state->replicas * sizeof(unsigned long));
@@ -815,7 +815,7 @@ int redset_recover_partner_rebuild(
           MPI_Recv(recv_bufs[i], count, MPI_BYTE, rhs_rank, 0, d->comm, &status[0]);
 
           /* write data to the logical file */
-          if (redset_file_pwrite(&rsf, recv_bufs[i], count, offset) != REDSET_SUCCESS)
+          if (redset_lofi_pwrite(&rsf, recv_bufs[i], count, offset) != REDSET_SUCCESS)
           {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -884,7 +884,7 @@ int redset_recover_partner_rebuild(
     if (need_send) {
       /* read data from files */
       if (send_count > 0) {
-        if (redset_file_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
+        if (redset_lofi_pread(&rsf, send_bufs[0], send_count, send_offset) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -959,13 +959,13 @@ int redset_recover_partner_rebuild(
   }
 
   /* close my data files */
-  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+  if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
   if (need_files) {
-    redset_file_apply_meta(current_hash);
+    redset_lofi_apply_meta(current_hash);
   }
 
   /* free the buffers */
@@ -1002,7 +1002,7 @@ int redset_recover_partner(
   if (redset_read_partner_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
     kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, d->rank);
-    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+    if (redset_lofi_check(current_hash) != REDSET_SUCCESS) {
       have_my_files = 0;
     }
   } else {

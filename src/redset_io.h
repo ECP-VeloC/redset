@@ -63,29 +63,6 @@ ssize_t redset_read_line(const char* file, int fd, char* buf, size_t size);
 /** write a formatted string to specified file descriptor */
 ssize_t redset_writef(const char* file, int fd, const char* format, ...);
 
-/** logically concatenate n opened files and read count bytes from this logical file into buf starting
- * from offset, pad with zero on end if missing data */
-int redset_read_pad_n(
-  int n,
-  const char** files,
-  int* fds,
-  char* buf,
-  unsigned long count,
-  unsigned long offset,
-  unsigned long* filesizes
-);
-
-/** write to an array of open files with known filesizes and treat them as one single large file */
-int redset_write_pad_n(
-  int n,
-  const char** files,
-  int* fds,
-  char* buf,
-  unsigned long count,
-  unsigned long offset,
-  unsigned long* filesizes
-);
-
 /** given a filename, return stat info */
 int redset_stat(const char* file, struct stat* statbuf);
 
