@@ -60,12 +60,10 @@ typedef struct {
   unsigned int*  mat;        /* encoding matrix (ranks + encoding) x ranks */
 } redset_reedsolomon;
 
-#if 0
 typedef struct {
   int count;
   const char** files;
 } redset_list;
-#endif
 
 int redset_set_partners(
   MPI_Comm parent_comm, MPI_Comm comm, int dist,

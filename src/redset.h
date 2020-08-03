@@ -141,12 +141,33 @@ const char* redset_filelist_file(
  * The interfaces below are temporary.
  ***********************/
 
-typedef struct {
-  int count;
-  const char** files;
-} redset_list;
+redset_filelist redset_filelist_get_data_partner(
+  int num,
+  const char** files,
+  int* groupsize,
+  int** groupranks
+);
 
-redset_filelist redset_filelist_get_data(
+int redset_rebuild_partner(
+  int num,
+  const char** files,
+  const char* prefix,
+  const kvtree* map
+);
+
+redset_filelist redset_filelist_get_data_xor(
+  int num,
+  const char** files
+);
+
+void redset_lookup_ranks_xor(
+  int num,
+  const char** files,
+  int* global_ranks,
+  int* missing_rank
+);
+
+redset_filelist redset_filelist_get_data_xor(
   int num,
   const char** files
 );
