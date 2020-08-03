@@ -214,18 +214,18 @@ int redset_apply_xor(
   kvtree* current_hash = kvtree_new();
 
   /* encode file info into hash */
-  redset_file_encode_kvtree(current_hash, numfiles, files);
+  redset_lofi_encode_kvtree(current_hash, numfiles, files);
 
   /* open our logical file for reading */
-  redset_file rsf;
-  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+  redset_lofi rsf;
+  if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
     redset_abort(-1, "Opening data files for copying: @ %s:%d",
       __FILE__, __LINE__
     );
   }
 
   /* get size of our logical file */
-  unsigned long my_bytes = redset_file_bytes(&rsf);
+  unsigned long my_bytes = redset_lofi_bytes(&rsf);
 
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
@@ -317,7 +317,7 @@ int redset_apply_xor(
           chunk_id_rel--;
         }
         unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-        if (redset_file_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+        if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
         {
           rc = REDSET_FAILURE;
         }
@@ -355,7 +355,7 @@ int redset_apply_xor(
   }
 
   /* close my dataset files */
-  redset_file_close(&rsf);
+  redset_lofi_close(&rsf);
 
   /* free the buffers */
   redset_buffers_free(1, &send_bufs);
@@ -383,7 +383,7 @@ int redset_recover_xor_rebuild(
   int i;
   MPI_Status status[2];
 
-  redset_file rsf;
+  redset_lofi rsf;
   int fd_xor = -1;
 
   /* get pointer to XOR state structure */
@@ -414,7 +414,7 @@ int redset_recover_xor_rebuild(
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
 
     /* open our data files for reading */
-    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files for reading during rebuild @ %s:%d",
         __FILE__, __LINE__
       );
@@ -458,7 +458,7 @@ int redset_recover_xor_rebuild(
     mode_t mode_file = redset_getmode(1, 1, 0);
 
     /* get the number of files that we need to rebuild */
-    if (redset_file_open(current_hash, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
         __FILE__, __LINE__
       );
@@ -514,7 +514,7 @@ int redset_recover_xor_rebuild(
         /* read the next set of bytes for this chunk from my file into send_buf */
         if (chunk_id != d->rank) {
           /* for this chunk, read data from the logical file */
-          if (redset_file_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+          if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
           {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -546,7 +546,7 @@ int redset_recover_xor_rebuild(
         /* if this is not my xor chunk, write data to normal file, otherwise write to my xor chunk */
         if (chunk_id != d->rank) {
           /* for this chunk, write data to the logical file */
-          if (redset_file_pwrite(&rsf, recv_buf, count, offset) != REDSET_SUCCESS)
+          if (redset_lofi_pwrite(&rsf, recv_buf, count, offset) != REDSET_SUCCESS)
           {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -571,7 +571,7 @@ int redset_recover_xor_rebuild(
   }
 
   /* close my checkpoint files */
-  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+  if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -611,7 +611,7 @@ int redset_recover_xor_rebuild(
 
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
   if (root == d->rank) {
-    redset_file_apply_meta(current_hash);
+    redset_lofi_apply_meta(current_hash);
   }
 
   /* free the buffers */
@@ -638,7 +638,7 @@ int redset_recover_xor(
   if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
     /* got our XOR file, see if we have each data file */
     kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
-    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+    if (redset_lofi_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       need_rebuild = 1;
     }

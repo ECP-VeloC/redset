@@ -98,7 +98,7 @@ static int redset_recover_xor_rebuild_serial(
   int root,
   char* xor_files[],
   int xor_fds[],
-  redset_file* rsfs,
+  redset_lofi* rsfs,
   size_t chunk_size)
 {
   int i, j;
@@ -152,7 +152,7 @@ static int redset_recover_xor_rebuild_serial(
         /* read the next set of bytes for this chunk from my file into send_buf */
         if (chunk_id != ((i + root) % xor_set_size)) {
           /* read chunk from the logical file for this rank */
-          if (redset_file_pread(&rsfs[i], buffer_B, count, offset[i]) != REDSET_SUCCESS)
+          if (redset_lofi_pread(&rsfs[i], buffer_B, count, offset[i]) != REDSET_SUCCESS)
           {
             /* our read failed, set the return code to an error */
             rc = 1;
@@ -178,7 +178,7 @@ static int redset_recover_xor_rebuild_serial(
       /* at this point, we have the data from the missing rank, write it out */
       if (chunk_id != root) {
         /* write chunk to logical file for the missing rank */
-        if (redset_file_pwrite(&rsfs[0], buffer_A, count, write_pos) != REDSET_SUCCESS)
+        if (redset_lofi_pwrite(&rsfs[0], buffer_A, count, write_pos) != REDSET_SUCCESS)
         {
           /* our write failed, set the return code to an error */
           rc = 1;
@@ -232,7 +232,7 @@ int redset_rebuild(
   char** xor_files     = REDSET_MALLOC(xor_set_size * sizeof(char*));
   int*   xor_fds       = REDSET_MALLOC(xor_set_size * sizeof(int));
   kvtree** xor_headers = REDSET_MALLOC(xor_set_size * sizeof(kvtree*));
-  redset_file* rsfs    = REDSET_MALLOC(xor_set_size * sizeof(redset_file));
+  redset_lofi* rsfs    = REDSET_MALLOC(xor_set_size * sizeof(redset_lofi));
   if (xor_ranks == NULL || xor_files == NULL || xor_fds == NULL || xor_headers == NULL || rsfs == NULL) {
     redset_err("Failed to allocate buffer memory @ %s:%d",
       __FILE__, __LINE__
@@ -360,7 +360,7 @@ int redset_rebuild(
     if (i == 0) {
       /* rebuild root data files, open user data files for writing */
       mode_t mode_file = redset_getmode(1, 1, 0);
-      if (redset_file_open_mapped(current_hash, map, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsfs[i]) != REDSET_SUCCESS) {
+      if (redset_lofi_open_mapped(current_hash, map, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsfs[i]) != REDSET_SUCCESS) {
         redset_err("Opening user data files for writing @ %s:%d",
           __FILE__, __LINE__
         );
@@ -368,7 +368,7 @@ int redset_rebuild(
       }
     } else {
       /* open user data files for reading */
-      if (redset_file_open_mapped(current_hash, map, O_RDONLY, (mode_t)0, &rsfs[i]) != REDSET_SUCCESS) {
+      if (redset_lofi_open_mapped(current_hash, map, O_RDONLY, (mode_t)0, &rsfs[i]) != REDSET_SUCCESS) {
         redset_err("Opening user data files for reading @ %s:%d",
           __FILE__, __LINE__
         );
@@ -404,7 +404,7 @@ int redset_rebuild(
 
   /* close each of the user files */
   for (i = 0; i < xor_set_size; i++) {
-    if (redset_file_close(&rsfs[i]) != REDSET_SUCCESS) {
+    if (redset_lofi_close(&rsfs[i]) != REDSET_SUCCESS) {
       rc = 1;
     }
   }
@@ -419,7 +419,7 @@ int redset_rebuild(
   /* apply meta data to each rebuilt file */
   if (rc == 0) {
     kvtree* current_hash = kvtree_getf(xor_headers[0], "%s %d", REDSET_KEY_COPY_XOR_DESC, xor_ranks[0]);
-    if (redset_file_apply_meta_mapped(current_hash, map) != REDSET_SUCCESS) {
+    if (redset_lofi_apply_meta_mapped(current_hash, map) != REDSET_SUCCESS) {
       rc = 1;
     }
   }

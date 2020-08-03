@@ -1089,18 +1089,18 @@ int redset_apply_rs(
   kvtree* current_hash = kvtree_new();
 
   /* encode file info into hash */
-  redset_file_encode_kvtree(current_hash, num_files, files);
+  redset_lofi_encode_kvtree(current_hash, num_files, files);
 
   /* open logical file for reading */
-  redset_file rsf;
-  if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+  redset_lofi rsf;
+  if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
     redset_abort(-1, "Opening data files for reading for encoding @ %s:%d",
       __FILE__, __LINE__
     );
   }
 
   /* get size of our logical file */
-  unsigned long my_bytes = redset_file_bytes(&rsf);
+  unsigned long my_bytes = redset_lofi_bytes(&rsf);
 
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
@@ -1214,7 +1214,7 @@ int redset_apply_rs(
       unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
 
       /* read data from our file into send buffer */
-      if (redset_file_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+      if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
       {
         /* read failed, make sure we fail this rebuild */
         rc = REDSET_FAILURE;
@@ -1275,7 +1275,7 @@ int redset_apply_rs(
   }
 
   /* close my dataset files */
-  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+  if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -1356,7 +1356,7 @@ int redset_recover_rs_rebuild(
   int i;
   int j;
 
-  redset_file rsf;
+  redset_lofi rsf;
   int fd_chunk = -1;
 
   /* get pointer to RS state structure */
@@ -1408,7 +1408,7 @@ int redset_recover_rs_rebuild(
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
 
     /* lookup number of files this process wrote */
-    if (redset_file_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_RDONLY, (mode_t)0, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files for reading during rebuild @ %s:%d",
         __FILE__, __LINE__
       );
@@ -1477,7 +1477,7 @@ int redset_recover_rs_rebuild(
     mode_t mode_file = redset_getmode(1, 1, 0);
 
     /* get the number of files that we need to rebuild */
-    if (redset_file_open(current_hash, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
+    if (redset_lofi_open(current_hash, O_WRONLY | O_CREAT | O_TRUNC, mode_file, &rsf) != REDSET_SUCCESS) {
       redset_abort(-1, "Failed to open data files for writing during rebuild @ %s:%d",
         __FILE__, __LINE__
       );
@@ -1630,7 +1630,7 @@ int redset_recover_rs_rebuild(
           unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
 
           /* read data from our file */
-          if (redset_file_pread(&rsf, send_bufs[0], count, offset) != REDSET_SUCCESS)
+          if (redset_lofi_pread(&rsf, send_bufs[0], count, offset) != REDSET_SUCCESS)
           {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -1713,7 +1713,7 @@ int redset_recover_rs_rebuild(
           /* for this chunk, write data to the logical file */
           int chunk_id_rel = get_data_id(d->ranks, state->encoding, d->rank, received_chunk_id);
           unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-          if (redset_file_pwrite(&rsf, recv_bufs[lhs_rank], count, offset) != REDSET_SUCCESS)
+          if (redset_lofi_pwrite(&rsf, recv_bufs[lhs_rank], count, offset) != REDSET_SUCCESS)
           {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
@@ -1749,7 +1749,7 @@ int redset_recover_rs_rebuild(
   }
 
   /* close my checkpoint files */
-  if (redset_file_close(&rsf) != REDSET_SUCCESS) {
+  if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -1789,7 +1789,7 @@ int redset_recover_rs_rebuild(
 
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
   if (need_rebuild) {
-    redset_file_apply_meta(current_hash);
+    redset_lofi_apply_meta(current_hash);
   }
 
   /* free buffers */
@@ -1822,7 +1822,7 @@ int redset_recover_rs(
   if (redset_read_rs_file(name, d, header) == REDSET_SUCCESS) {
     /* got our chunk file, see if we have each data file */
     kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
-    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+    if (redset_lofi_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       need_rebuild = 1;
     }

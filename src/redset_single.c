@@ -93,7 +93,7 @@ int redset_apply_single(
   kvtree* current_hash = kvtree_new();
 
   /* encode file info into hash */
-  redset_file_encode_kvtree(current_hash, numfiles, files);
+  redset_lofi_encode_kvtree(current_hash, numfiles, files);
 
   /* store our redundancy descriptor in hash */
   kvtree* desc_hash = kvtree_new();
@@ -142,7 +142,7 @@ int redset_recover_single(
   if (redset_read_single_file(name, d, header) == REDSET_SUCCESS) {
     /* get pointer to hash for this rank */
     kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_SINGLE_DESC, d->rank);
-    if (redset_file_check(current_hash) != REDSET_SUCCESS) {
+    if (redset_lofi_check(current_hash) != REDSET_SUCCESS) {
       /* some data file is bad */
       have_my_files = 0;
     }
