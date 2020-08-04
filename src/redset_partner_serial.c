@@ -25,14 +25,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
-
-/* variable length args */
-#include <stdarg.h>
 #include <errno.h>
-
-/* basename/dirname */
-#include <unistd.h>
-#include <libgen.h>
 
 #define REDSET_KEY_COPY_PARTNER_DESC    "DESC"
 #define REDSET_KEY_COPY_PARTNER_RANKS   "RANKS"
@@ -74,7 +67,7 @@ static int lookup_group_size(const kvtree* header, const char* file)
 
   int ranks = 0;
   kvtree* rank_hash = kvtree_get_kv_int(header, REDSET_KEY_COPY_PARTNER_DESC, group_rank);
-  kvtree* desc_hash  = kvtree_get(rank_hash, REDSET_KEY_COPY_PARTNER_DESC);
+  kvtree* desc_hash = kvtree_get(rank_hash, REDSET_KEY_COPY_PARTNER_DESC);
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_GROUP_SIZE, &ranks) != KVTREE_SUCCESS) {
     redset_err("Failed to read group size from PARTNER file header in %s @ %s:%d",
       file, __FILE__, __LINE__
@@ -115,7 +108,6 @@ static int lookup_world_rank(const kvtree* hash, int group_rank)
 /* given a descriptor, lookup and return group info */
 static int lookup_group_info(
   const kvtree* hash,
-  const char* file,
   int* group_num,
   int* group_id,
   int* group_size,
@@ -126,38 +118,38 @@ static int lookup_group_info(
   kvtree* desc_hash = kvtree_get(hash, REDSET_KEY_COPY_PARTNER_DESC);
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_GROUPS, group_num) != KVTREE_SUCCESS) {
-    redset_err("Failed to read number of groups from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read number of groups from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_GROUP, group_id) != KVTREE_SUCCESS) {
-    redset_err("Failed to read group id from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read group id from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_GROUP_SIZE, group_size) != KVTREE_SUCCESS) {
-    redset_err("Failed to read group size from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read group size from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_GROUP_RANK, group_rank) != KVTREE_SUCCESS) {
-    redset_err("Failed to read group rank from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read group rank from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_WORLD_SIZE, world_size) != KVTREE_SUCCESS) {
-    redset_err("Failed to read world size from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read world size from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
   if (kvtree_util_get_int(desc_hash, REDSET_KEY_CONFIG_WORLD_RANK, world_rank) != KVTREE_SUCCESS) {
-    redset_err("Failed to read world rank from descriptor in %s @ %s:%d",
-      file, __FILE__, __LINE__
+    redset_err("Failed to read world rank from descriptor @ %s:%d",
+      __FILE__, __LINE__
     );
   }
 
@@ -173,7 +165,7 @@ static int redset_recover_partner_rebuild_serial_redundancy(
   int total_ranks,
   redset_lofi* rsfs)
 {
-  int rc = 0;
+  int rc = REDSET_SUCCESS;
 
   /* allocate buffer to read data */
   char* buffer = REDSET_MALLOC(buffer_size * sizeof(char));
@@ -242,7 +234,7 @@ static int redset_recover_partner_rebuild_serial(
   int total_ranks,
   redset_lofi* rsfs)
 {
-  int rc = 0;
+  int rc = REDSET_SUCCESS;
 
   /* allocate buffer to read data */
   char* buffer = REDSET_MALLOC(buffer_size * sizeof(char));
@@ -321,14 +313,9 @@ int redset_rebuild_partner(
   int rc = REDSET_SUCCESS;
 
   int total_ranks = 0;
-  int replicas = 0;
-
-  int* missing            = NULL;
-  kvtree** current_hashes = NULL;
-  redset_lofi* rsfs       = NULL;
-  char** filenames        = NULL;
-  int* fds                = NULL;
-  off_t* header_sizes     = NULL;
+  int replicas    = 0;
+  int* missing    = NULL;
+  kvtree** hashes = NULL;
 
   int i;
   for (i = 0; i < num; i++) {
@@ -336,25 +323,26 @@ int redset_rebuild_partner(
     const char* file = files[i];
     int fd = redset_open(file, O_RDONLY);
     if (fd < 0) {
-      redset_err("Opening PARTNER file for reading: redset_open(%s) errno=%d %s @ %s:%d",
+      redset_warn("Opening PARTNER file for reading: redset_open(%s) errno=%d %s @ %s:%d",
         file, errno, strerror(errno), __FILE__, __LINE__
       );
-      /* TODO: free memory allocated */
-      return REDSET_FAILURE;
+      continue;
     }
 
     /* read header from the file */
     kvtree* header = kvtree_new();
-    if (kvtree_read_fd(file, fd, header) != KVTREE_SUCCESS) {
+    if (kvtree_read_fd(file, fd, header) < 0) {
       /* failed to read header from this file */
+      redset_warn("Failed to read header from PARTNER file `%s' @ %s:%d",
+        file, __FILE__, __LINE__
+      );
       kvtree_delete(&header);
       redset_close(file, fd);
-      /* TODO: free memory allocated */
       continue;
     }
 
     /* if this is our first file, get number of ranks in the redudancy group */
-    if (current_hashes == NULL) {
+    if (hashes == NULL) {
       /* read number of items in the redudancy group */
       total_ranks = lookup_group_size(header, file);
 
@@ -365,28 +353,13 @@ int redset_rebuild_partner(
       missing = (int*) REDSET_MALLOC(total_ranks * sizeof(int));
 
       /* allocate a spot to hold the file info for each member */
-      current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
-
-      /* allocate a logical file for each member */
-      rsfs = (redset_lofi*) REDSET_MALLOC(total_ranks * sizeof(redset_lofi));
-
-      /* allocate an array to hold strdup of name of each redundancy file */
-      filenames = (char**) REDSET_MALLOC(total_ranks * sizeof(char*));
-
-      /* allocate a file descriptor for each redundancy file for each member */
-      fds = (int*) REDSET_MALLOC(total_ranks * sizeof(int));
-
-      /* allocate a file descriptor for each redundancy file for each member */
-      header_sizes = (off_t*) REDSET_MALLOC(total_ranks * sizeof(off_t));
+      hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
 
       /* initialize all spots to NULL so we know whether we've already read it in */
       int j;
       for (j = 0; j < total_ranks; j++) {
-        missing[j]        = 1;
-        current_hashes[j] = NULL;
-        filenames[j]      = NULL;
-        fds[j]            = -1;
-        header_sizes[j]   = 0;
+        missing[j] = 1;
+        hashes[j]  = NULL;
       }
     }
 
@@ -405,13 +378,13 @@ int redset_rebuild_partner(
       int rank = kvtree_elem_key_int(rank_elem);
 
       /* copy to our array if it's not already set */
-      if (current_hashes[rank] == NULL) {
+      if (hashes[rank] == NULL) {
         /* not set, get pointer to file info */
         kvtree* rank_hash = kvtree_elem_hash(rank_elem);
 
         /* allocate an empty kvtree and copy the file info */
-        current_hashes[rank] = kvtree_new();
-        kvtree_merge(current_hashes[rank], rank_hash);
+        hashes[rank] = kvtree_new();
+        kvtree_merge(hashes[rank], rank_hash);
       }
     }
 
@@ -419,24 +392,73 @@ int redset_rebuild_partner(
     redset_close(file, fd);
   }
 
+  /* check that we opened at least one file to get a rank count */
+  if (total_ranks == 0) {
+    /* failed to read rank count from any file */
+    redset_err("Failed to get group size from redudancy files @ %s:%d",
+      __FILE__, __LINE__
+    );
+    return REDSET_FAILURE;
+  }
+
+  /* check that we have a hash for every member in the group */
+  int invalid = 0;
+  for (i = 0; i < total_ranks; i++) {
+    if (hashes[i] == NULL) {
+      /* missing file info for some member */
+      invalid = 1;
+    }
+  }
+  if (invalid) {
+    redset_err("Insufficient data to rebuild group @ %s:%d",
+      __FILE__, __LINE__
+    );
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
+    return REDSET_FAILURE;
+  }
+
   /* check that we can identify set of files for all procs in the set */
   for (i = 0; i < total_ranks; i++) {
-    const kvtree* current_hash = current_hashes[i];
+    const kvtree* current_hash = hashes[i];
     if (redset_lofi_check_mapped(current_hash, map) != REDSET_SUCCESS) {
       missing[i] = 1;
     }
   }
 
+  /* TODO: if nothing is missing, we could exit early */
+
+  /* allocate a logical file for each member */
+  redset_lofi* rsfs = (redset_lofi*) REDSET_MALLOC(total_ranks * sizeof(redset_lofi));
+
+  /* allocate an array to hold strdup of name of each redundancy file */
+  char** filenames = (char**) REDSET_MALLOC(total_ranks * sizeof(char*));
+
+  /* allocate a file descriptor for each redundancy file for each member */
+  int* fds = (int*) REDSET_MALLOC(total_ranks * sizeof(int));
+
+  /* allocate a file descriptor for each redundancy file for each member */
+  off_t* header_sizes = (off_t*) REDSET_MALLOC(total_ranks * sizeof(off_t));
+
+  /* initialize all spots to NULL so we know whether we've already read it in */
+  for (i = 0; i < total_ranks; i++) {
+    filenames[i]    = NULL;
+    fds[i]          = -1;
+    header_sizes[i] = 0;
+  }
+
   /* open data and partner files */
   for (i = 0; i < total_ranks; i++) {
     /* get file info for the current process */
-    kvtree* current_hash = current_hashes[i];
+    kvtree* current_hash = hashes[i];
 
     /* lookup group membership info for this process */
     int group_num, group_id, group_size, group_rank, world_size, world_rank;
     lookup_group_info(
-      current_hash, filenames[i],
-      &group_num, &group_id, &group_size, &group_rank, &world_size, &world_rank
+      current_hash, &group_num, &group_id, &group_size, &group_rank, &world_size, &world_rank
     );
 
     /* define name for partner file */
@@ -455,6 +477,7 @@ int redset_rebuild_partner(
         redset_err("Opening user data files for writing @ %s:%d",
           __FILE__, __LINE__
         );
+        /* TODO: would be nice to clean up memory */
         return REDSET_FAILURE;
       }
 
@@ -464,6 +487,7 @@ int redset_rebuild_partner(
         redset_err("Opening partner file to be reconstructed: redset_open(%s) errno=%d %s @ %s:%d",
           filenames[i], errno, strerror(errno), __FILE__, __LINE__
         );
+        /* TODO: would be nice to clean up memory */
         return REDSET_FAILURE;
       }
     } else {
@@ -472,6 +496,7 @@ int redset_rebuild_partner(
         redset_err("Opening user data files for reading @ %s:%d",
           __FILE__, __LINE__
         );
+        /* TODO: would be nice to clean up memory */
         return REDSET_FAILURE;
       }
 
@@ -481,6 +506,7 @@ int redset_rebuild_partner(
         redset_err("Opening partner file to be read: redset_open(%s) errno=%d %s @ %s:%d",
           filenames[i], errno, strerror(errno), __FILE__, __LINE__
         );
+        /* TODO: would be nice to clean up memory */
         return REDSET_FAILURE;
       }
 
@@ -503,7 +529,7 @@ int redset_rebuild_partner(
       for (dist = 0; dist <= replicas; dist++) {
         int rank = (i - dist + total_ranks) % total_ranks;
         kvtree* desc_hash = kvtree_new();
-        kvtree_merge(desc_hash, current_hashes[rank]);
+        kvtree_merge(desc_hash, hashes[rank]);
         kvtree_setf(header, desc_hash, "%s %d", REDSET_KEY_COPY_PARTNER_DESC, rank);
       }
 
@@ -517,6 +543,7 @@ int redset_rebuild_partner(
       if (kvtree_write_fd(filenames[i], fds[i], header) < 0) {
         rc = REDSET_FAILURE;
       }
+      kvtree_delete(&header);
 
       /* make note of header size */
       header_sizes[i] = lseek(fds[i], 0, SEEK_CUR);
@@ -562,7 +589,7 @@ int redset_rebuild_partner(
     redset_lofi_close(&rsfs[i]);
   }
 
-  /* close partner files */
+  /* close redundancy files */
   for (i = 0; i < total_ranks; i++) {
     if (missing[i]) {
       //redset_fsync(filenames[i], fds[i]);
@@ -574,29 +601,30 @@ int redset_rebuild_partner(
   if (rc == REDSET_SUCCESS) {
     for (i = 0; i < total_ranks; i++) {
       if (missing[i]) {
-        int apply_rc = redset_lofi_apply_meta_mapped(current_hashes[i], map);
+        int apply_rc = redset_lofi_apply_meta_mapped(hashes[i], map);
         if (apply_rc != REDSET_SUCCESS) {
         }
       }
     }
   }
 
-  /* if the write failed, delete the files we just wrote, and return an error */
+  /* if the write failed, delete the files we just wrote */
   if (rc != REDSET_SUCCESS) {
-    // TODO: unlink files
-    return 1;
+    // TODO: unlink new files we just created
   }
 
   for (i = 0; i < total_ranks; i++) {
+    kvtree_delete(&hashes[i]);
     redset_free(&filenames[i]);
   }
 
-  redset_free(&missing);
-  redset_free(&current_hashes);
   redset_free(&rsfs);
   redset_free(&filenames);
   redset_free(&fds);
   redset_free(&header_sizes);
+
+  redset_free(&missing);
+  redset_free(&hashes);
 
   return rc;
 }
@@ -610,10 +638,14 @@ redset_filelist redset_filelist_get_data_partner(
   int* groupsize,
   int** groupranks)
 {
+  /* initialize output parameters */
+  *groupsize  = 0;
+  *groupranks = NULL;
+
   int total_ranks = 0;
   int total_files = 0;
   int* global_ranks = NULL;
-  kvtree** current_hashes = NULL;
+  kvtree** hashes = NULL;
 
   int i;
   for (i = 0; i < num; i++) {
@@ -621,18 +653,27 @@ redset_filelist redset_filelist_get_data_partner(
     const char* file = files[i];
     int fd = redset_open(file, O_RDONLY);
     if (fd < 0) {
-      redset_err("Opening PARTNER file for reading: redset_open(%s) errno=%d %s @ %s:%d",
+      /* failed to open this file, print error and skip it */
+      redset_warn("Opening PARTNER file for reading: redset_open(%s) errno=%d %s @ %s:%d",
         file, errno, strerror(errno), __FILE__, __LINE__
       );
-      return NULL;
+      continue;
     }
 
     /* read header from the file */
     kvtree* header = kvtree_new();
-    kvtree_read_fd(file, fd, header);
+    if (kvtree_read_fd(file, fd, header) < 0) {
+      /* failed to read header from this file, print error and skip it */
+      redset_warn("Failed to read header from `%s' @ %s:%d",
+        file, __FILE__, __LINE__
+      );
+      kvtree_delete(&header);
+      redset_close(file, fd);
+      continue;
+    }
 
     /* if this is our first file, get number of ranks in the redudancy group */
-    if (current_hashes == NULL) {
+    if (hashes == NULL) {
       /* read number of items in the redudancy group */
       total_ranks = lookup_group_size(header, file);
 
@@ -640,12 +681,12 @@ redset_filelist redset_filelist_get_data_partner(
       global_ranks = (int*) REDSET_MALLOC(total_ranks * sizeof(int));
 
       /* allocate a spot to hold the file info for each member */
-      current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
+      hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
 
       /* initialize all spots to NULL so we know whether we've already read it in */
       int j;
       for (j = 0; j < total_ranks; j++) {
-        current_hashes[j] = NULL;
+        hashes[j] = NULL;
       }
     }
 
@@ -660,16 +701,16 @@ redset_filelist redset_filelist_get_data_partner(
       int rank = kvtree_elem_key_int(rank_elem);
 
       /* copy to our array if it's not already set */
-      if (current_hashes[rank] == NULL) {
+      if (hashes[rank] == NULL) {
         /* not set, get pointer to file info */
         kvtree* rank_hash = kvtree_elem_hash(rank_elem);
 
         /* allocate an empty kvtree and copy the file info */
-        current_hashes[rank] = kvtree_new();
-        kvtree_merge(current_hashes[rank], rank_hash);
+        hashes[rank] = kvtree_new();
+        kvtree_merge(hashes[rank], rank_hash);
 
         /* record global rank of this member */
-        global_ranks[rank] = lookup_world_rank(current_hashes[rank], rank);
+        global_ranks[rank] = lookup_world_rank(hashes[rank], rank);
 
         /* get number of files for this rank */
         int numfiles = 0;
@@ -681,8 +722,36 @@ redset_filelist redset_filelist_get_data_partner(
     }
 
     kvtree_delete(&header);
-
     redset_close(file, fd);
+  }
+
+  /* check that we opened at least one file to get a rank count */
+  if (total_ranks == 0) {
+    /* failed to read rank count from any file */
+    redset_err("Failed to get group size from redudancy files @ %s:%d",
+      __FILE__, __LINE__
+    );
+    return NULL;
+  }
+
+  /* check that we have a hash for every member in the group */
+  int invalid = 0;
+  for (i = 0; i < total_ranks; i++) {
+    if (hashes[i] == NULL) {
+      /* missing file info for some member */
+      invalid = 1;
+    }
+  }
+  if (invalid) {
+    redset_err("Insufficient data to rebuild group @ %s:%d",
+      __FILE__, __LINE__
+    );
+    redset_free(&global_ranks);
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    return NULL;
   }
 
   /* allocate a list to hold files for all ranks */
@@ -692,23 +761,12 @@ redset_filelist redset_filelist_get_data_partner(
 
   int idx = 0;
   for (i = 0; i < total_ranks; i++) {
-    if (current_hashes[i] == NULL) {
-      /* ERROR! */
-      redset_err("Insufficient data to rebuild group @ %s:%d",
-        __FILE__, __LINE__
-      );
-      /* TODO: free all hashes after i */
-      redset_free(&global_ranks);
-      redset_free(&current_hashes);
-      return NULL;
-    }
-
     /* get number of files for this rank */
     int numfiles = 0;
-    kvtree_util_get_int(current_hashes[i], "FILES", &numfiles);
+    kvtree_util_get_int(hashes[i], "FILES", &numfiles);
 
     int j;
-    kvtree* files_hash = kvtree_get(current_hashes[i], "FILE");
+    kvtree* files_hash = kvtree_get(hashes[i], "FILE");
     for (j = 0; j < numfiles; j++) {
       /* get file name of this file */
       kvtree* index_hash = kvtree_getf(files_hash, "%d", j);
@@ -718,10 +776,10 @@ redset_filelist redset_filelist_get_data_partner(
       idx++;
     }
 
-    kvtree_delete(&current_hashes[i]);
+    kvtree_delete(&hashes[i]);
   }
 
-  redset_free(&current_hashes);
+  redset_free(&hashes);
 
   *groupsize  = total_ranks;
   *groupranks = global_ranks;
