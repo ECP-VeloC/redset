@@ -11,7 +11,7 @@ LIST(APPEND libredset_install_headers
 )
 INSTALL(FILES ${libredset_install_headers} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-LIST(APPEND cliredset_noMPI_srcs
+LIST(APPEND redset_noMPI_srcs
     redset_err_serial.c
     redset_util.c
     redset_io.c
@@ -52,12 +52,12 @@ SET_TARGET_PROPERTIES(redset-static PROPERTIES OUTPUT_NAME redset CLEAN_DIRECT_O
 INSTALL(TARGETS redset-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 # Non-MPI library for CLI
-ADD_LIBRARY(redset_base SHARED ${cliredset_noMPI_srcs})
-TARGET_LINK_LIBRARIES(redset_base ${REDSET_EXTERNAL_LIBS})
+ADD_LIBRARY(redset_base SHARED ${redset_noMPI_srcs})
+TARGET_LINK_LIBRARIES(redset_base ${REDSET_SERIAL_LIBS})
 INSTALL(TARGETS redset_base DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-ADD_LIBRARY(redset_base-static STATIC ${cliredset_noMPI_srcs})
-TARGET_LINK_LIBRARIES(redset_base-static ${REDSET_EXTERNAL_LIBS})
+ADD_LIBRARY(redset_base-static STATIC ${redset_noMPI_srcs})
+TARGET_LINK_LIBRARIES(redset_base-static ${REDSET_SERIAL_LIBS})
 SET_TARGET_PROPERTIES(redset_base-static PROPERTIES OUTPUT_NAME redset_base CLEAN_DIRECT_OUTPUT 1)
 INSTALL(TARGETS redset_base-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
@@ -66,13 +66,13 @@ INSTALL(TARGETS redset_base-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 ##############
 
 ## Individual binaries generated from a single .c file
-#LIST(APPEND cliredset_c_bins
+#LIST(APPEND redset_c_bins
 #	redset_rebuild_xor
 #)
 #
 ## Build and install C binaries
-#FOREACH(bin IN ITEMS ${cliredset_c_bins})
+#FOREACH(bin IN ITEMS ${redset_c_bins})
 #	ADD_EXECUTABLE(${bin} ${bin}.c)
 #	TARGET_LINK_LIBRARIES(${bin} redset_base)
 #	INSTALL(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/${bin} DESTINATION ${CMAKE_INSTALL_BINDIR})
-#ENDFOREACH(bin IN ITEMS ${cliredset_c_bins})
+#ENDFOREACH(bin IN ITEMS ${redset_c_bins})
