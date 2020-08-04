@@ -40,8 +40,10 @@ static void redset_build_single_filename(
   char* file, 
   size_t len)
 {
-  snprintf(file, len, "%s.single.grp_%d_of_%d.mem_%d_of_%d.redset",
-    name, d->group_id+1, d->groups, d->rank+1, d->ranks
+  int rank_world;
+  MPI_Comm_rank(d->parent_comm, &rank_world);
+  snprintf(file, len, "%s%d.single.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, rank_world, d->group_id+1, d->groups, d->rank+1, d->ranks
   );
 }
 

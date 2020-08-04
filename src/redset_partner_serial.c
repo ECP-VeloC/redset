@@ -463,7 +463,7 @@ int redset_rebuild_partner(
 
     /* define name for partner file */
     char partner_name[1024];
-    snprintf(partner_name, sizeof(partner_name), "%s.%d.partner.grp_%d_of_%d.mem_%d_of_%d.redset",
+    snprintf(partner_name, sizeof(partner_name), "%s%d.partner.grp_%d_of_%d.mem_%d_of_%d.redset",
       prefix, world_rank, group_id+1, group_num, group_rank+1, group_size
     );
     filenames[i] = strdup(partner_name);
