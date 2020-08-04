@@ -157,19 +157,16 @@ int redset_rebuild_partner(
 
 redset_filelist redset_filelist_get_data_xor(
   int num,
-  const char** files
+  const char** files,
+  int* groupsize,
+  int** groupranks
 );
 
-void redset_lookup_ranks_xor(
+int redset_rebuild_xor(
   int num,
   const char** files,
-  int* global_ranks,
-  int* missing_rank
-);
-
-redset_filelist redset_filelist_get_data_xor(
-  int num,
-  const char** files
+  const char* prefix,
+  const kvtree* map
 );
 
 /* enable C++ codes to include this header directly */
