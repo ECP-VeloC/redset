@@ -27,12 +27,10 @@ static void redset_build_partner_filename(
   char* file, 
   size_t len)
 {
-  /* get pointer to partner state structure */
-  int rank;
-  MPI_Comm_rank(d->comm, &rank);
-  redset_partner* state = (redset_partner*) d->state;
-  snprintf(file, len, "%s.partner.grp_%d_of_%d.mem_%d_of_%d.redset",
-    name, d->group_id+1, d->groups, d->rank+1, d->ranks
+  int rank_world;
+  MPI_Comm_rank(d->parent_comm, &rank_world);
+  snprintf(file, len, "%s%d.partner.grp_%d_of_%d.mem_%d_of_%d.redset",
+    name, rank_world, d->group_id+1, d->groups, d->rank+1, d->ranks
   );
 }
 

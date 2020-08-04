@@ -731,10 +731,11 @@ int redset_bool_have_files(
 
 static int redset_build_filename(
   const char* name,
+  int rank,
   char* file,
   size_t len)
 {
-  snprintf(file, len, "%s.redset", name);
+  snprintf(file, len, "%s%d.redset", name, rank);
   return REDSET_SUCCESS;
 }
 
@@ -788,7 +789,7 @@ static int redset_encode_reddesc(
 
   /* write meta data to file */
   char filename[REDSET_MAX_FILENAME];
-  redset_build_filename(name, filename, sizeof(filename));
+  redset_build_filename(name, rank_world, filename, sizeof(filename));
   kvtree_write_file(filename, meta_hash);
 
   /* delete the hash */
@@ -802,9 +803,13 @@ static int redset_unencode_reddesc(
   const char* name,
   const redset_base* d)
 {
+  /* get our rank */
+  int rank_world;
+  MPI_Comm_rank(d->parent_comm, &rank_world);
+
   /* delete meta data file */
   char filename[REDSET_MAX_FILENAME];
-  redset_build_filename(name, filename, sizeof(filename));
+  redset_build_filename(name, rank_world, filename, sizeof(filename));
   int rc = redset_file_unlink(filename);
   return rc;
 }
@@ -824,7 +829,7 @@ static int redset_recover_reddesc(
   /* read meta data from file */
   kvtree* hash = kvtree_new();
   char filename[REDSET_MAX_FILENAME];
-  redset_build_filename(name, filename, sizeof(filename));
+  redset_build_filename(name, rank_world, filename, sizeof(filename));
   kvtree_read_file(filename, hash);
 
   /* create a hash to exchange redundancy descriptors */
@@ -1114,7 +1119,7 @@ static int redset_from_dir(
   /* read meta data from file */
   kvtree* hash = kvtree_new();
   char filename[REDSET_MAX_FILENAME];
-  redset_build_filename(name, filename, sizeof(filename));
+  redset_build_filename(name, rank, filename, sizeof(filename));
   kvtree_read_file(filename, hash);
 
   /* get pointer to descriptor hash for this rank */
@@ -1160,6 +1165,10 @@ redset_filelist redset_filelist_get(
     break;
   }
 
+  /* get our world rank */
+  int rank_world;
+  MPI_Comm_rank(d->parent_comm, &rank_world);
+
   /* we have a top level redundancy file in addition to anything added by scheme,
    * allocate space for the full file list */
   int count = tmp->count + 1;
@@ -1167,7 +1176,7 @@ redset_filelist redset_filelist_get(
 
   /* record name of top level file */
   char filename[REDSET_MAX_FILENAME];
-  redset_build_filename(name, filename, sizeof(filename));
+  redset_build_filename(name, rank_world, filename, sizeof(filename));
   files[0] = strdup(filename);
 
   /* record each redundancy file */

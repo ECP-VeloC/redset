@@ -462,7 +462,7 @@ int redset_rebuild_xor(
 
     /* define name for partner file */
     char redfile_name[1024];
-    snprintf(redfile_name, sizeof(redfile_name), "%s.%d.xor.grp_%d_of_%d.mem_%d_of_%d.redset",
+    snprintf(redfile_name, sizeof(redfile_name), "%s%d.xor.grp_%d_of_%d.mem_%d_of_%d.redset",
       prefix, world_rank, group_id+1, group_num, group_rank+1, group_size
     );
     filenames[i] = strdup(redfile_name);
