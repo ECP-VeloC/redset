@@ -374,9 +374,6 @@ static int redset_create_base(
     MPI_Comm_dup(MPI_COMM_SELF, &d->comm);
     break;
   case REDSET_COPY_PARTNER:
-    /* dup the communicator across failure groups */
-    redset_split_across(comm, comm_fail, &d->comm);
-    break;
   case REDSET_COPY_XOR:
   case REDSET_COPY_RS:
     /* split the communicator across groups based on set size
@@ -471,10 +468,10 @@ int redset_create_single(
 int redset_create_partner(
   MPI_Comm comm,
   const char* group_name,
+  int set_size,
   int replicas,
   redset* dvp)
 {
-  int set_size = 8;
   int rc = redset_create_base(REDSET_COPY_PARTNER, comm, group_name, set_size, replicas, dvp);
   return rc;
 }

@@ -64,6 +64,7 @@ int redset_create_single(
 int redset_create_partner(
   MPI_Comm comm,     /**< [IN]  - process group participating in set */
   const char* group, /**< [IN]  - string specifying procs in the same failure group */
+  int size,          /**< [IN]  - minimum number of ranks for a redundancy set */
   int replicas,      /**< [IN]  - number of partner replicas */
   redset* d          /**< [OUT] - output redundancy descriptor */
 );
