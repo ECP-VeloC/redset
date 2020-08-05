@@ -1,10 +1,8 @@
 redset
 ======
-A redundancy descriptor is a data structure that describes how a dataset is encoded.
-It tracks information such as the list of source files and the redundancy scheme that is applied.
-The data structure also records information on the group of processes that make up a redundancy set,
-such as the number of processes in the set, as well as,
-a unique integer that identifies the set, called the "group id".
+A redundancy descriptor is a data structure that describes how a dataset should be encoded.
+It tracks information including the redundancy scheme to be applied
+and the group of processes that make up a redundancy set.
 
 This section describes some of the most common redundancy descriptor functions.
 
@@ -12,38 +10,83 @@ For more documentation see src/redset.h and the examples in test/test_redset.c.
 
 For developers, some high-level implementation details are in doc/rst/implementation.rst.
 
-Initializing and freeing redundancy descriptors
-+++++++++++++++++++++++++++++++++++++++++++++++
-Create a new redundancy set::
+Create and delete redundancy descriptors
+++++++++++++++++++++++++++++++++++++++++
+Create a new redundancy descriptor::
 
   redset d;
   redset_create(type, comm, group, &d);
 
 The ``type`` specifies the redundancy scheme that should be applied.
-It should be one of: ``REDSET_COPY_SINGLE``, ``REDSET_COPY_PARTNER``, ``REDSET_COPY_XOR``.
+It should be one of: ``REDSET_COPY_SINGLE``, ``REDSET_COPY_PARTNER``, ``REDSET_COPY_XOR``, or ``REDSET_COPY_RS``.
 
 The ``comm`` value specifies the MPI communicator containing the processes participating in the set.
+All redset functions are implied collectives over the set of processes in ``comm``.
 
 The ``group`` value is a string specifying the failure group.
 All processes proving the same value for ``group`` are expected to fail at the same time.
 For example, one might use the hostname to indicate that all processes on the same host are likely to fail simultaneously.
 
-Free memory associated with a redundancy descriptor::
+Alternatively, each redundancy scheme has a custom create method
+to allow the caller to specify certain parameters specific to each scheme::
+
+  redset_create_single(comm, group, &d);
+  redset_create_partner(comm, group, set_size, replicas, &d);
+  redset_create_xor(comm, group, set_size, &d);
+  redset_create_rs(comm, group, set_size, k, &d);
+
+The ``comm`` and ``group`` parameters are the same as described above.
+
+The ``set_size`` parameter specifies the minimum number of processes to include in each redundancy set.
+The redset library uses this parameter to divide large process groups into smaller sets
+such that no subset has less than ``set_size`` processes.
+This division is done after subsetting processes across failure groups.
+If the original set of processes is less than ``set_size``, redset constructs the largest set possible.
+To illustrate, if the caller specifies ``set_size=8``,
+redset creates redundancy groups of the following sizes for each count of available processes::
+
+  procs   resulting set sizes
+  4       4    (create a set as large as possible when total procs are less than 8)
+  8       8
+  9       9    (cannot divide 9 so that each subset has at least 8 procs)
+  15      15
+  16      8, 8 (can divide 16 so that each subset has at least 8 procs)
+  17      9, 8
+  18      9, 9
+
+The ``replicas`` parameter specifies the number of partner copies to make.
+This can range from 1 to one less than the set size.
+
+The ``k`` parameter specifies the number of encoding blocks for Reed-Solomon.
+This can range from 1 to one less than the set size.
+Each group can recover from up to ``k`` simultaneous failures within the redundancy set.
+
+To free resources associated with a redundancy descriptor::
 
   redset_delete(&d);
 
-Apply, recover, and unapply a redundancy scheme
-+++++++++++++++++++++++++++++++++++++++++++++++
+Apply and unapply a redundancy scheme
++++++++++++++++++++++++++++++++++++++
 To apply a redundancy scheme to a set of files::
 
-  redset_appy(numfiles, files, name, d);
+  redset_apply(numfiles, files, name, d);
 
-Here, ``files`` should be an array of file names and ``numfiles`` provides the size of the array.
-The ``name`` parameter specifies a prefix string to prepend to the name of all redundancy files the library creates.
-The ``name`` string can include directory components to write redundancy files to a different directory,
-otherwise they will be written to the current working directory.
+Here ``files`` is an array of file names and ``numfiles`` provides the size of the array.
+The ``name`` parameter specifies a prefix string to prepend to the name of all redundancy files that redset creates.
+The ``name`` string can include directory components to write redundancy files into a particular directory,
+otherwise redundancy files are written to the current working directory.
+When specifying a different directory, the target directory must already exist.
 
-To recover files accoding to a redundancy scheme::
+To remove a redundancy scheme and delete the associated redundancy files::
+
+  redset_unapply(name, d);
+
+The ``name`` parameter must specify the same string prefix used when the redundancy scheme was applied.
+
+Recover files with a redundancy scheme
+++++++++++++++++++++++++++++++++++++++
+When recovering files, one provides communicator and name as input parameters,
+and one receives a redundancy descriptor as output::
 
   redset d;
   int ret = redset_recover(comm, name, &d);
@@ -52,21 +95,23 @@ To recover files accoding to a redundancy scheme::
   } else {
     // data lost
   }
+  redset_delete(&d);
 
-Here ``comm`` should correspond to the same parent communicator used to create the original redundancy descriptor,
-and ``name`` should specify the prefix string used when the redundancy descriptor was applied.
-If the rebuild succeeds, this will return REDSET_SUCCESS.
-It returns the same value to all processes in ``comm``.
+The ``comm`` parameter must be equivalent to the parent communicator that was used to create the original redundancy descriptor.
+The ``name`` parameter must specify the same prefix string that was used when the redundancy descriptor was applied.
+The call to ``redset_recover`` returns the same return code to all processes in ``comm``.
+If the recover operation succeeds, ``redset_recover`` returns REDSET_SUCCESS.
+The recover operation is successful if either redset verifies that all source and associated redundancy files still exist
+or if redset can successfully rebuild any files that are missing.
 
-To remove a redundancy scheme and delete assocated redundancy files::
-
-  redset_unapply(name, d);
-
-Again, ``name`` should specify the string prefix used when the redundancy scheme was applied.
+Whether successful or not, ``redset_recover`` returns a redundancy descriptor in the output parameter ``d``.
+One may call ``redset_unapply`` using the returned descriptor to attempt to remove redset redundancy files,
+though if the recover operation fails, redset may not have sufficient information to remove all redundancy files.
+The caller is responsible for freeing the descriptor returned in ``d`` with a call to ``redset_free``.
 
 Listing redundancy files
 ++++++++++++++++++++++++
-Sometimes it may be necessary to obtain a list of files added when the redundancy scheme was applied::
+Sometimes it is necessary for the caller to obtain a list of files added when the redundancy scheme was applied::
 
   int i;
   redset_filelist list = redset_filelist_get(name, d);
@@ -74,3 +119,4 @@ Sometimes it may be necessary to obtain a list of files added when the redundanc
   for (i = 0; i < count; i++) {
     const char* file = redset_filelist_file(list, i);
   }
+  redset_filelist_release(&list);
