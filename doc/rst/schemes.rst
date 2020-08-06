@@ -438,8 +438,8 @@ this reduces to ``O(m * (p - 1) * B / (p - k))``.
 
 Note that for ``p >> k``, ``(p - 1) / (p - k) ~ 1`` so this is approximately ``O(m * B)``,
 meaning rebuild cost is independent of the group size ``p``.
-At the other extreme for ``k = p - 1``, then this is ``O(m * (p - 1) * B)``.
-In all cases, the rebuild cost scales linearly with the number of missing processes ``m``.
+At the other extreme for ``k = p - 1``, then this is ``O(m * (p - 1) * B)``,
+and then if ``m = k = p - 1``, then this gives ``O(m^2 * B) = O((p - 1)^2 * B) = O(p^2 * B)``.
 
 RS file
 -------
