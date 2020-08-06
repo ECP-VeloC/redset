@@ -405,8 +405,6 @@ The algorithm to compute the checksum data is shown in Figure fig-rs-encode_.
 Each process writes a piece of each of its checksum blocks every (p-k) steps.
 In each step, each process reads data from its files, sends data to k processes, and receives data from k processes.
 Each process encodes the received data based on the encoding matrix coefficients for the corresponding sending rank and checksum block.
-The time complexity for computing the encoding is ``O(B * k)``,
-and the additional space required to store the redundancy data scales as ``O(k * B / (p - k))``.
 
 .. _fig-rs-encode
 
@@ -414,15 +412,13 @@ and the additional space required to store the redundancy data scales as ``O(k *
 
 .. Reed-Solomon parallel encode
 
+The time complexity for computing the encoding is ``O(B * k)``,
+and the additional space required to store the redundancy data scales as ``O(k * B / (p - k))``.
+
 RS rebuild
 ----------
 The algorithm to rebuild lost files is illustrated in Figure fig-rs-decode_.
-All processes in the group participate to recover missing data
-so that recovery cost does not increase with the group size ``p`` for large enough ``B``.
-Recovery time for ``m`` failures (where ``m <= k``) scales as ``O(m^2 * B / (p - k) + B)``.
-The decode cost involves Gaussian elimination to solve an ``m x m`` matrix,
-which takes ``m^2`` steps with each step requiring ``B / (p - k)`` operations.
-Each process that is missing files must then receive its full ``B`` bytes after decoding.
+All processes in the group participate to recover missing data.
 
 .. _fig-rs-decode
 
@@ -430,6 +426,20 @@ Each process that is missing files must then receive its full ``B`` bytes after 
 .. figure:: fig/rs_decode2.png
 
 .. Reed-Solomon parallel rebuild
+
+Recovery time for ``m`` failures (where ``m <= k``) scales as ``O(m * (p - 1) * B / (p - k))``.
+The encode cost for the reduce-scatter scales as ``O(m * (p - 1) * B / (p - k))``.
+The decode cost after reduction involves Gaussian elimination to solve an ``m x m`` matrix,
+which takes ``m^2`` steps with each step requiring ``m + B / (p - k)`` operations which gives ``O(m^2 * B / (p - k))`` assuming that ``m << B / (p - k)``.
+Finally, the cost to gather data on a process that is missing files is ``O(p * B / (p - k))`` bytes after decoding.
+All together these three terms give ``O(m * (p - 1) * B / (p - k)  +  m^2 * B / (p - k)  +  p * B / (p - k))``.
+Since ``m <= k <= p - 1`` so that ``m^2 <= m * (p - 1)``,
+this reduces to ``O(m * (p - 1) * B / (p - k))``.
+
+Note that for ``p >> k``, ``(p - 1) / (p - k) ~ 1`` so this is approximately ``O(m * B)``,
+meaning rebuild cost is independent of the group size ``p``.
+At the other extreme for ``k = p - 1``, then this is ``O(m * (p - 1) * B)``.
+In all cases, the rebuild cost scales linearly with the number of missing processes ``m``.
 
 RS file
 -------
