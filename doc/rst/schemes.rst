@@ -377,23 +377,54 @@ Some useful references for understanding Reed-Solomon encoding and arithmetic wi
 
 In short, a ``(p + k) x p`` encoding matrix is constructed, where the top ``p x p`` portion is an identity matrix,
 and the bottom ``k`` rows give the encoding coefficients for each of the ``k`` checksum blocks.
-For each checksum row, each process multiplies its data by the coefficient that corresponds to its column in the matrix.
-Since the algorithm is implemented with GF(2^8), operations are executed in units of bytes.
+This matrix is constructed such that any ``p`` rows are linearly independent.
+For example, an example encoding matrix for 4 processes and 2 checksums is::
 
-To decode, the missing processes are first identified.
+  1  0  0  0
+  0  1  0  0
+  0  0  1  0
+  0  0  0  1
+  27 28 18 20
+  28 27 20 18
+
+Define this encoding matrix as ``E``.
+A word of data taken from each of the ``p`` processes defines a data vector ``d``.
+The matrix-vector product ``Ed`` produces an output vector of length ``p + k``,
+where the first ``p`` elements are equal to the data vector ``d``,
+and the last ``k`` elements are the encoded checksum values.
+Keeping with the above example, there are two checksum values, which are computed as::
+
+  c0 = (27 * d0) + (28 * d1) + (18 * d2) + (20 * d3)
+  c1 = (28 * d0) + (27 * d1) + (20 * d2) + (18 * d3)
+
+where ``d0``, ``d1``, ``d2``, and ``d3`` are each a word of data from each of the four processes,
+and ``c0`` and ``c1`` are each a word of encoded checksum data.
+
+To decode, the ``m`` missing processes are first identified.
 Then one chooses any ``m`` distinct rows from the encoding matrix which gives ``m`` equations for ``m`` unknowns.
-The coefficients of the rows in the encoding matrix corresponding to the ``m`` missing processes lead to an ``m x m`` matrix,
+For each selected row, the coefficients of the columns corresponding to the ``m`` missing processes define an ``m x m`` matrix,
 which is reduced to an ``m x m`` identity matrix via Gaussian elimination to recover the missing data.
 
-Addition and subtraction for GF(2^8) amounts to XOR.
+A critical detail is that all arithmetic is under a Galois Field, in particular GF(2^8).
+For GF(2^8), all operations are executed in units of bytes.
+Addition and subtraction amount to performing binary XOR operations.
 Multiplication and division of two elements is accomplished through table look ups.
-Matrix operations like Gaussian elimination follow the normal rules of linear algebra.
+It holds that for any value ``a``, ``a+0 = a``, ``a*0 = 0``, and ``a*1 = a``.
+Under this arithmetic, matrix operations including matrix-vector multiplication
+and Gaussian elimination follow the normal rules of linear algebra.
 
 RS encode
 ---------
 The RS algorithm is an extension of the approach described for XOR,
 where each process stores ``k`` encoding chunks instead of 1 XOR chunk.
 As with the XOR scheme, Reed-Solomon concatenates and pads logical files as shown in Figure fig-rs-general_.
+This leads to ``p`` rows of chunks across the ``p`` processes,
+where ``k`` checksum chunks are stored in each row and each process stores ``k`` checksum chunks.
+When a process is responsible for storing a checksum chunk in a given row,
+it contributes data consisting of all 0.
+Thus, for a given row of chunks,
+``p - k`` processes contribute actual data,
+and ``k`` processes contribute data of all 0.
 
 .. _fig-rs-general
 
@@ -401,10 +432,44 @@ As with the XOR scheme, Reed-Solomon concatenates and pads logical files as show
 
 .. Reed-Solomon intersperses k checksum blocks into logical files based on process rank
 
+Assuming we have the checksum coefficients from the example coding matrix above::
+
+  27 28 18 20
+  28 27 20 18
+
+in all rows, ``c0`` and ``c1`` are generally computed as::
+
+  c0 = (27 * d0) + (28 * d1) + (18 * d2) + (20 * d3)
+  c1 = (28 * d0) + (27 * d1) + (20 * d2) + (18 * d3)
+
+where ``d0``, ``d1``, ``d2``, and ``d3`` are the data contributed from each of the four processes.
+
+Consider process 0 which stores ``c0`` in the first row of chunks and ``c1`` in the second row of chunks.
+For computing ``c0`` in the first row, both process 0 and process 3 contribute data of all 0,
+since each stores checksum chunks in that row.
+Similarly for ``c1`` in the second row, both process 0 and process 1 contribute data of all 0.
+Substituting in these 0 values, the encodings for ``c0`` and ``c1`` on process 0::
+
+  c0 = (27 * 0) + (28 * d1) + (18 * d2) + (20 * 0 )
+  c1 = (28 * 0) + (27 * 0 ) + (20 * d2) + (18 * d3)
+
+reduce to::
+
+  c0 = (28 * d1) + (18 * d2)
+  c1 = (20 * d2) + (18 * d3)
+
+In each row, a process that is responsible for storing a checksum chunk must ultimately encode data from ``p - k`` processes.
+The data from the other ``k`` processes is implied to be 0 and does not change the value of the checksum.
+
 The algorithm to compute the checksum data is shown in Figure fig-rs-encode_.
-Each process writes a piece of each of its checksum blocks every (p-k) steps.
-In each step, each process reads data from its files, sends data to k processes, and receives data from k processes.
-Each process encodes the received data based on the encoding matrix coefficients for the corresponding sending rank and checksum block.
+Each process writes final checksum data to its redundancy file after every ``p - k`` steps.
+In each step, a process reads a piece of data from its logical file.
+It sends that data to ``k`` different processes, and it receives data from ``k`` different processes.
+Each process encodes the data it receives according to the matrix coefficient that corresponds
+to the rank of the sending process and the given checksum chunk it is computing.
+The process accumulates those encoded partial results in its checksum buffers.
+After ``p - k`` steps, the process has computed the final encoded checksum result,
+which it writes to its redundancy file.
 
 .. _fig-rs-encode
 
@@ -412,39 +477,39 @@ Each process encodes the received data based on the encoding matrix coefficients
 
 .. Reed-Solomon parallel encode
 
-The time complexity for computing the encoding is ``O(B * k)``,
-and the additional space required to store the redundancy data scales as ``O(k * B / (p - k))``.
+Again consider process 0.
+In step 1 as shown in b), process 0 reads data from its logical file,
+and it sends that same data to both process 3 and process 2.
+It receives incoming data from process 1 and process 2.
+It encodes and accumulates the data from process 1 into its buffer for ``c0``,
+and it encodes an accumulates the data from process 2 into its buffer for ``c1``::
 
-RS rebuild
-----------
-The algorithm to rebuild lost files is illustrated in Figure fig-rs-decode_.
-All processes in the group participate to recover missing data.
+  c0 += 28 * d1
+  c1 += 20 * d2
 
-.. _fig-rs-decode
+In step 2 as shown in c), process 0 reads data from its logical file,
+and it sends that same data to both process 2 and process 1.
+It receives data from process 2 and process 3, which it encodes and accumulates into its checksum buffers::
 
-.. figure:: fig/rs_decode1.png
-.. figure:: fig/rs_decode2.png
+  c0 += 18 * d2
+  c1 += 18 * d3
 
-.. Reed-Solomon parallel rebuild
+After the second step, process 0 has the final encoded result for ``c0`` and ``c1``,
+which it then writes to its redundancy file as shown in d).
 
-Recovery time for ``m`` failures (where ``m <= k``) scales as ``O(m * (p - 1) * B / (p - k))``.
-The encode cost for the reduce-scatter scales as ``O(m * (p - 1) * B / (p - k))``.
-The decode cost after reduction involves Gaussian elimination to solve an ``m x m`` matrix,
-which takes ``m^2`` steps with each step requiring ``m + B / (p - k)`` operations which gives ``O(m^2 * B / (p - k))`` assuming that ``m << B / (p - k)``.
-Finally, the cost to gather data on a process that is missing files is ``O(p * B / (p - k))`` bytes after decoding.
-All together these three terms give ``O(m * (p - 1) * B / (p - k)  +  m^2 * B / (p - k)  +  p * B / (p - k))``.
-Since ``m <= k <= p - 1`` so that ``m^2 <= m * (p - 1)``,
-this reduces to ``O(m * (p - 1) * B / (p - k))``.
+To execute this algorithm, there are ``p - k`` steps.
+In each step, a process receives and encodes data from ``k`` processes.
+The amount of data to be encoded for each checksum block is ``B / (p - k)``.
+Finally, each process writes ``k`` chunks of size ``B / (p - k)`` to its redundancy file.
+Thus the time complexity for computing the encoding is ``O((p-k) * k * B/(p-k) + k * B/(p-k))``,
+which simplifies to ``O(k * B)``.
 
-Note that for ``p >> k``, ``(p - 1) / (p - k) ~ 1`` so this is approximately ``O(m * B)``,
-meaning rebuild cost is independent of the group size ``p``.
-At the other extreme for ``k = p - 1``, then this is ``O(m * (p - 1) * B)``,
-and then if ``m = k = p - 1``, then this gives ``O(m^2 * B) = O((p - 1)^2 * B) = O(p^2 * B)``.
+The additional space required to store the redundancy data on a process scales as ``O(k * B/(p-k))``.
 
 RS file
 -------
 The RS redundancy file contains a header stored as a kvtree followed by the RS checksum chunk data stored as binary data.
-The checksum chunks are appended in order immediately following the header.
+Each of the ``k`` checksum chunks is appended in order immediately following the header.
 The header provides file information for the calling process and the group of processes that belong to the redundancy set.
 A process also stores copies of the meta data for each of its ``k`` left-most neighbors.
 
@@ -543,3 +608,132 @@ The RS redundancy file name is of the form::
 
   <prefix><rank>.rs.grp_<group_id>_of_<group_num>.mem_<group_rank>_of_<group_size>.redset
 
+RS rebuild
+----------
+To rebuild, first the ``m`` processes that have lost files are identified.
+So long as ``m <= k``, all data can be recovered.
+In that case, ``m`` distinct rows are selected from the ``k`` checksum rows of the encoding matrix.
+
+When multiplied by the data from each process and combined with the checksum value,
+each of these rows can be written as an equation of ``p + 1`` terms that sum to 0.
+For example, assume that we have the example encoding matrix and that 2 processes have been lost, so that ``m = 2``.
+Both checksum rows are selected to give the following two equations::
+
+  (27 * d0) + (28 * d1) + (18 * d2) + (20 * d3) + c0 = 0
+  (28 * d0) + (27 * d1) + (20 * d2) + (18 * d3) + c1 = 0
+
+Note that the checksum terms are shown with a ``+`` sign instead of a ``-`` sign,
+since addition and subtraction are the same operation under GF(2^8), binary XOR.
+
+In each equation, there are at most ``m`` unknown terms.
+The unknown term can correspond to either a data term or a checksum value depending
+on the process that is missing and the row of chunks under consideration.
+For a row in which a missing process was responsible for storing a checksum value,
+that checksum value will be lost but the data term for that process is known,
+since it is known to have contributed data of all 0.
+
+Gaussian elimination is then used to solve for the ``m`` unknowns given the ``m`` equations.
+To parallelize the operation, all processes participate to recover missing data.
+Each process is responsible for recovering the data missing in one row of chunks,
+and the recovered data is then gathered to each missing process.
+The algorithm to rebuild lost files is illustrated in Figure fig-rs-decode_.
+
+.. _fig-rs-decode
+
+.. figure:: fig/rs_decode1.png
+.. figure:: fig/rs_decode2.png
+
+.. Reed-Solomon parallel rebuild
+
+As shown in the figure, consider that process 1 and process 2 are both lost,
+and consider the task to recover the data missing from the second row of chunks.
+We pick the second row, since one of the two missing processes (process 1) is
+responsible for storing a checksum chunk ``c0``, which makes the example more interesting.
+
+Referring back to the figure from the RS encoding section,
+one can see that process 1 stored the ``c0`` checksum for the second row,
+and so it is known to have contributed data of all 0.
+Also, process 0 stored ``c1`` for the second row, so it also contributed data of all 0.
+After substituting ``d0 = 0`` and ``d1 = 0`` for the data from those two processes,
+the general equations above::
+
+  (27 * 0) + (28 * 0) + (18 * d2) + (20 * d3) + c0 = 0
+  (28 * 0) + (27 * 0) + (20 * d2) + (18 * d3) + c1 = 0
+
+simplify to::
+
+  (18 * d2) + (20 * d3) + c0 = 0
+  (20 * d2) + (18 * d3) + c1 = 0
+
+Here, ``c0`` (the checksum stored on process 1) and ``d2`` (the data from process 2) are unknown.
+Keeping the unknowns on the left and moving all known terms to the right,
+again with the fact that ``+`` and ``-`` represent the same operation,
+this can be rewritten as::
+
+  (18 * d2) + c0 = (20 * d3)
+  (20 * d2)      = (18 * d3) + c1
+
+This gives two equations and two unknowns, which can be expressed as ``Ax = b``.
+The coefficients of ``d2`` and ``c0`` on the left form an ``m x m`` matrix ``A``::
+
+  18 1
+  20 0
+
+which is multiplied by a vector of ``m`` unknowns ``x``::
+
+  d2
+  c0
+
+to give a vector of known values ``b``::
+
+  (20 * d3)
+  (18 * d3) + c1
+
+The unknowns can then be solved for by Gaussian elimination to compute ``x = A^-1 b``.
+The Gaussian elimination is also carried out under GF(2^8) arithmetic.
+
+Referring to the figure that illustrates the RS rebuild algorithm,
+first the ``m`` missing processes are identified in a).
+Each process allocates a buffer for each of the ``m`` processes.
+From the ``k`` checksum encoding rows, ``m`` rows are selected.
+
+Based on the ``m`` selected rows,
+all known values are encoded and summed with a pipelined reduction as shown in b) through d).
+There are ``p - 1`` steps in this reduction.
+In each step, a process reads data from its logical file or redundancy file and sends
+that data to another process.
+If a process is missing its data, it sends data consisting of all 0 in this step.
+Each process receives data from another process.
+The receiving process encodes the incoming data according to the coefficient
+from the encoding matrix that corresponds to the sending process and the given row of chunks.
+This requires ``p - 1`` steps, where a process encodes the received data ``m`` separate times.
+The total data received is of size ``B / (p - k)``,
+so this reduction takes ``O((p-1) * m * B/(p-k))`` time.
+
+The unknowns are then solved for using Gaussian elimination represented in e) and f).
+Gaussian elimination of an ``m x m`` matrix takes ``m^2`` steps,
+and each step takes ``m + B/(p-k)`` operations.
+This requires ``O(m^2 * (m + B/(p-k)))`` time,
+which simplifies to ``O(m^2 * B/(p-k))`` assuming that ``m << B/(p-k)``.
+
+Each process then sends the recovered data to each of the ``m`` missing processes as shown in g).
+Each missing process receives data from ``p - 1`` processes, each of size ``B / (p - k)``,
+and it writes a total of ``p`` chunks of size ``B / (p - k)`` to its logical file or its redundancy file as represented in h).
+This requires ``O(p * B/(p-k))`` time.
+
+In summary, the complexity for each of these phases is::
+
+  Reduce-scatter to accumulate known values: O(m * (p-1) * B/(p-k))
+  Gaussian elimination to solve m unknowns:  O(m^2 * B/(p-k))
+  Gather and write data on missing process:  O(p * B/(p-k))
+
+Combined these three terms give ``O(m * (p-1) * B/(p-k)  +  m^2 * B/(p-k)  +  p * B/(p-k))``.
+
+Since ``m <= k <= p-1`` so that ``m^2 <= m * (p-1)``, this reduces to ``O(m * (p-1) * B/(p-k))``.
+
+Note that for ``p >> k``, ``(p-1)/(p-k) ~ 1``, and then the expression is approximately ``O(m * B)``,
+meaning rebuild cost is independent of the group size ``p``.
+
+At the other extreme when ``k = p-1``, then the expression simplifies to ``O(m * (p-1) * B)``,
+and then additionally if ``m = k``, this gives ``O(m^2 * B)`` or equivalently ``O((p-1)^2 * B) = O(p^2 * B)``,
+so that rebuild cost scales quadratically with the group size ``p``.
