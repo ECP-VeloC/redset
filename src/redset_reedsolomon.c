@@ -1789,10 +1789,9 @@ int redset_recover_rs_rebuild(
   }
 #endif
 
-  /* reapply metadata properties to file: uid, gid, mode bits, timestamps */
-  if (need_rebuild) {
-    redset_lofi_apply_meta(current_hash);
-  }
+  /* reapply metadata properties to file: uid, gid, mode bits, timestamps,
+   * we do this on every file instead of just the rebuilt files so that we preserve atime on all files */
+  redset_lofi_apply_meta(current_hash);
 
   /* free buffers */
   redset_buffers_free(missing,  &data_bufs);
