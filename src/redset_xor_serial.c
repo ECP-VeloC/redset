@@ -575,13 +575,12 @@ int redset_rebuild_xor(
     redset_close(filenames[i], fds[i]);
   }
 
-  /* copy meta data properties to new file (uid, gid, mode, atime, mtime) */
+  /* copy meta data properties to new file (uid, gid, mode, atime, mtime),
+   * and reset atime on existing files */
   if (rc == REDSET_SUCCESS) {
     for (i = 0; i < total_ranks; i++) {
-      if (missing[i]) {
-        int apply_rc = redset_lofi_apply_meta_mapped(hashes[i], map);
-        if (apply_rc != REDSET_SUCCESS) {
-        }
+      int apply_rc = redset_lofi_apply_meta_mapped(hashes[i], map);
+      if (apply_rc != REDSET_SUCCESS) {
       }
     }
   }
