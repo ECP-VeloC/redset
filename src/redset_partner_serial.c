@@ -452,8 +452,28 @@ int redset_rebuild_partner(
     return REDSET_SUCCESS;
   }
 
-  /* check that we're not missing data from too many processes */
-  if (missing_count > replicas) {
+  /* if there is a consecutive string of missing ranks that is
+   * larger than the replica count, then we can't rebuild */
+  int can_rebuild = 1;
+  int missing_consecutive = 0;
+  for (i = 0; i < total_ranks + replicas; i++) {
+    /* we need to wrap from the end back to the beginning for up to replicas ranks,
+     * to check that ranks at the end also have a copy */
+    int rank = i % total_ranks;
+    if (missing[rank]) {
+      /* we are missing files for this rank, increment the coutner */
+      missing_consecutive++;
+      if (missing_consecutive > replicas) {
+        /* found a string of consecutive missing ranks
+         * which exceeds the replica count */
+        can_rebuild = 0;
+      }
+    } else {
+      /* we have files for this rank, so reset out counter */
+      missing_consecutive = 0;
+    }
+  }
+  if (! can_rebuild) {
     redset_err("Insufficient data to rebuild group @ %s:%d",
       __FILE__, __LINE__
     );
