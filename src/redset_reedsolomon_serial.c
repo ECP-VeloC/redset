@@ -678,7 +678,6 @@ int redset_rebuild_rs(
   /* if the write failed, delete the files we just wrote, and return an error */
   if (rc != REDSET_SUCCESS) {
     /* TODO: unlink files */
-    rc = REDSET_FAILURE;
   }
 
   for (i = 0; i < total_ranks; i++) {
@@ -693,8 +692,8 @@ int redset_rebuild_rs(
   for (i = 0; i < total_ranks; i++) {
     kvtree_delete(&hashes[i]);
   }
-  redset_free(&missing);
   redset_free(&hashes);
+  redset_free(&missing);
   kvtree_delete(&group_map);
 
   return rc;
