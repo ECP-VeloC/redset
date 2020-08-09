@@ -170,6 +170,20 @@ int redset_rebuild_xor(
   const kvtree* map
 );
 
+redset_filelist redset_filelist_get_data_rs(
+  int num,
+  const char** files,
+  int* groupsize,
+  int** groupranks
+);
+
+int redset_rebuild_rs(
+  int num,
+  const char** files,
+  const char* prefix,
+  const kvtree* map
+);
+
 /* enable C++ codes to include this header directly */
 #ifdef __cplusplus
 } /* extern "C" */
