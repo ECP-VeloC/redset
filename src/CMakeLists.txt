@@ -18,6 +18,8 @@ LIST(APPEND redset_noMPI_srcs
     redset_lofi.c
     redset_partner_serial.c
     redset_xor_serial.c
+    redset_reedsolomon_common.c
+    redset_reedsolomon_serial.c
 )
 
 LIST(APPEND libredset_srcs
@@ -30,6 +32,7 @@ LIST(APPEND libredset_srcs
     redset_single.c
     redset_partner.c
     redset_xor.c
+    redset_reedsolomon_common.c
     redset_reedsolomon.c
 )
 
