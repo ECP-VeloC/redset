@@ -381,6 +381,9 @@ int redset_rebuild_xor(
     redset_err("Failed to get group size from redundancy files @ %s:%d",
       __FILE__, __LINE__
     );
+    redset_free(&hashes);
+    redset_free(&missing);
+    kvtree_delete(&group_map);
     return REDSET_FAILURE;
   }
 
@@ -423,10 +426,29 @@ int redset_rebuild_xor(
     }
   }
 
-  /* TODO: if nothing is missing, we could exit early */
+  /* if nothing is missing, nothing else to do, we can exit early with success */
+  if (missing_count == 0) {
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
+    kvtree_delete(&group_map);
+    return REDSET_SUCCESS;
+  }
 
+  /* check that we're not missing data from too many processes */
   if (missing_count > 1) {
-    /* ERROR! */
+    redset_err("Insufficient data to rebuild group @ %s:%d",
+      __FILE__, __LINE__
+    );
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
+    kvtree_delete(&group_map);
+    return REDSET_FAILURE;
   }
 
   /* allocate a logical file for each member */
@@ -569,9 +591,6 @@ int redset_rebuild_xor(
 
   /* close redundancy files */
   for (i = 0; i < total_ranks; i++) {
-    if (missing[i]) {
-      //redset_fsync(filenames[i], fds[i]);
-    }
     redset_close(filenames[i], fds[i]);
   }
 
@@ -588,22 +607,22 @@ int redset_rebuild_xor(
   /* if the write failed, delete the files we just wrote, and return an error */
   if (rc != REDSET_SUCCESS) {
     /* TODO: unlink files */
-    return REDSET_FAILURE;
   }
 
   for (i = 0; i < total_ranks; i++) {
-    kvtree_delete(&hashes[i]);
     redset_free(&filenames[i]);
   }
+  redset_free(&filenames);
 
   redset_free(&rsfs);
-  redset_free(&filenames);
   redset_free(&fds);
   redset_free(&header_sizes);
 
-  redset_free(&missing);
+  for (i = 0; i < total_ranks; i++) {
+    kvtree_delete(&hashes[i]);
+  }
   redset_free(&hashes);
-
+  redset_free(&missing);
   kvtree_delete(&group_map);
 
   return rc;

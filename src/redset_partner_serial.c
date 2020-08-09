@@ -398,6 +398,11 @@ int redset_rebuild_partner(
     redset_err("Failed to get group size from redudancy files @ %s:%d",
       __FILE__, __LINE__
     );
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
     return REDSET_FAILURE;
   }
 
@@ -429,7 +434,36 @@ int redset_rebuild_partner(
     }
   }
 
-  /* TODO: if nothing is missing, we could exit early */
+  /* count number of ranks we're missing */
+  int missing_count = 0;
+  for (i = 0; i < total_ranks; i++) {
+    if (missing[i]) {
+      missing_count++;
+    }
+  }
+
+  /* if nothing is missing, nothing else to do, we can exit early with success */
+  if (missing_count == 0) {
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
+    return REDSET_SUCCESS;
+  }
+
+  /* check that we're not missing data from too many processes */
+  if (missing_count > replicas) {
+    redset_err("Insufficient data to rebuild group @ %s:%d",
+      __FILE__, __LINE__
+    );
+    for (i = 0; i < total_ranks; i++) {
+      kvtree_delete(&hashes[i]);
+    }
+    redset_free(&hashes);
+    redset_free(&missing);
+    return REDSET_FAILURE;
+  }
 
   /* allocate a logical file for each member */
   redset_lofi* rsfs = (redset_lofi*) REDSET_MALLOC(total_ranks * sizeof(redset_lofi));
@@ -591,9 +625,6 @@ int redset_rebuild_partner(
 
   /* close redundancy files */
   for (i = 0; i < total_ranks; i++) {
-    if (missing[i]) {
-      //redset_fsync(filenames[i], fds[i]);
-    }
     redset_close(filenames[i], fds[i]);
   }
 
@@ -613,17 +644,19 @@ int redset_rebuild_partner(
   }
 
   for (i = 0; i < total_ranks; i++) {
-    kvtree_delete(&hashes[i]);
     redset_free(&filenames[i]);
   }
+  redset_free(&filenames);
 
   redset_free(&rsfs);
-  redset_free(&filenames);
   redset_free(&fds);
   redset_free(&header_sizes);
 
-  redset_free(&missing);
+  for (i = 0; i < total_ranks; i++) {
+    kvtree_delete(&hashes[i]);
+  }
   redset_free(&hashes);
+  redset_free(&missing);
 
   return rc;
 }
