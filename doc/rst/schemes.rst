@@ -401,8 +401,10 @@ where ``d0``, ``d1``, ``d2``, and ``d3`` are each a word of data from each of th
 and ``c0`` and ``c1`` are each a word of encoded checksum data.
 
 To decode, the ``m`` missing processes are first identified.
-Then one chooses any ``m`` distinct rows from the encoding matrix which gives ``m`` equations for ``m`` unknowns.
-For each selected row, the coefficients of the columns corresponding to the ``m`` missing processes define an ``m x m`` matrix,
+Then one chooses any ``m`` distinct rows from ``k`` checksum rows of the encoding matrix,
+which gives ``m`` equations for ``m`` unknowns.
+For each selected row, the coefficients of the columns that correspond to the
+``m`` missing processes define an ``m x m`` matrix,
 which is reduced to an ``m x m`` identity matrix via Gaussian elimination to recover the missing data.
 
 A critical detail is that all arithmetic is under a Galois Field, in particular GF(2^8).
@@ -622,7 +624,7 @@ Both checksum rows are selected to give the following two equations::
   (27 * d0) + (28 * d1) + (18 * d2) + (20 * d3) + c0 = 0
   (28 * d0) + (27 * d1) + (20 * d2) + (18 * d3) + c1 = 0
 
-Note that the checksum terms are shown with a ``+`` sign instead of a ``-`` sign,
+Note that the checksum terms ``c0`` and ``c1`` are shown here with a ``+`` sign instead of a ``-`` sign,
 since addition and subtraction are the same operation under GF(2^8), binary XOR.
 
 In each equation, there are at most ``m`` unknown terms.
@@ -689,32 +691,34 @@ to give a vector of known values ``b``::
   (20 * d3)
   (18 * d3) + c1
 
-The unknowns can then be solved for by Gaussian elimination to compute ``x = A^-1 b``.
-The Gaussian elimination is also carried out under GF(2^8) arithmetic.
+The unknowns can then be solved for using Gaussian elimination to convert ``Ax = b``
+to the form ``Ix = b'`` where ``I`` is the ``m x m`` identity matrix so that ``x = b'``.
+The Gaussian elimination is carried out under GF(2^8) arithmetic.
 
 Referring to the figure that illustrates the RS rebuild algorithm,
 first the ``m`` missing processes are identified in a).
 Each process allocates a buffer for each of the ``m`` processes.
 From the ``k`` checksum encoding rows, ``m`` rows are selected.
 
-Based on the ``m`` selected rows,
+Using the coefficients defined by the ``m`` selected rows,
 all known values are encoded and summed with a pipelined reduction as shown in b) through d).
 There are ``p - 1`` steps in this reduction.
 In each step, a process reads data from its logical file or redundancy file and sends
 that data to another process.
 If a process is missing its data, it sends data consisting of all 0 in this step.
 Each process receives data from another process.
-The receiving process encodes the incoming data according to the coefficient
-from the encoding matrix that corresponds to the sending process and the given row of chunks.
+The receiving process encodes the incoming data ``m`` times according to the coefficients
+for the ``m`` selected rows that correspond to the sending process and the given row of chunks.
 This requires ``p - 1`` steps, where a process encodes the received data ``m`` separate times.
 The total data received is of size ``B / (p - k)``,
 so this reduction takes ``O((p-1) * m * B/(p-k))`` time.
+Using the ``Ax = b`` notation from above, this reduction computes the sum of known values ``b``.
 
 The unknowns are then solved for using Gaussian elimination represented in e) and f).
 Gaussian elimination of an ``m x m`` matrix takes ``m^2`` steps,
 and each step takes ``m + B/(p-k)`` operations.
 This requires ``O(m^2 * (m + B/(p-k)))`` time,
-which simplifies to ``O(m^2 * B/(p-k))`` assuming that ``m << B/(p-k)``.
+which simplifies to ``O(m^2 * B/(p-k))`` assuming that that ``m << B/(p-k)``.
 
 Each process then sends the recovered data to each of the ``m`` missing processes as shown in g).
 Each missing process receives data from ``p - 1`` processes, each of size ``B / (p - k)``,
