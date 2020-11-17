@@ -286,21 +286,6 @@ int redset_delete(redset* dvp)
   return REDSET_SUCCESS;
 }
 
-#define REDSET_KEY_CONFIG_ENABLED   "ENABLED"
-#define REDSET_KEY_CONFIG_INTERVAL  "INTERVAL"
-#define REDSET_KEY_CONFIG_OUTPUT    "OUTPUT"
-#define REDSET_KEY_CONFIG_STORE     "STORE"
-#define REDSET_KEY_CONFIG_DIRECTORY "DIR"
-#define REDSET_KEY_CONFIG_TYPE      "TYPE"
-#define REDSET_KEY_CONFIG_SET_SIZE  "SETSIZE"
-#define REDSET_KEY_CONFIG_GROUP      "GROUP"
-#define REDSET_KEY_CONFIG_GROUPS     "GROUPS"
-#define REDSET_KEY_CONFIG_GROUP_ID   "GROUP"
-#define REDSET_KEY_CONFIG_GROUP_SIZE "RANKS"
-#define REDSET_KEY_CONFIG_GROUP_RANK "RANK"
-#define REDSET_KEY_CONFIG_WORLD_SIZE "WRANKS"
-#define REDSET_KEY_CONFIG_WORLD_RANK "WRANK"
-
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
 int redset_to_kvtree(const redset_base* d, kvtree* hash)
