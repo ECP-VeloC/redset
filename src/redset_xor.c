@@ -146,6 +146,19 @@ int redset_construct_xor(MPI_Comm parent_comm, redset_base* d)
     );
   }
 
+  /* verify that all groups have a sufficient number of procs */
+  int valid = 1;
+  if (d->ranks <= 1) {
+    valid = 0;
+  }
+  if (! redset_alltrue(valid, parent_comm)) {
+    if (! valid) {
+      redset_abort(-1, "XOR requires at least 2 ranks per set, but found %d rank(s) in set @ %s:%d",
+        d->ranks, __FILE__, __LINE__
+      );
+    }
+  }
+
   return rc;
 }
 
