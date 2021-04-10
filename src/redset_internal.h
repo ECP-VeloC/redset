@@ -8,8 +8,6 @@
 #include "redset_util.h"
 #include "redset_lofi.h"
 
-#define REDSET_VERSION "1.0"
-
 /* names of parameters used when serializing a redset to disk */
 #define REDSET_KEY_CONFIG_ENABLED   "ENABLED"
 #define REDSET_KEY_CONFIG_INTERVAL  "INTERVAL"

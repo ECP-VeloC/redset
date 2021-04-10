@@ -24,8 +24,6 @@
 #include "redset.h"
 #include "redset_util.h"
 
-#define REDSET_VERSION "1.0"
-
 /* sends a NUL-terminated string to a process,
  * allocates space and recieves a NUL-terminated string from a process,
  * can specify MPI_PROC_NULL as either send or recv rank */
