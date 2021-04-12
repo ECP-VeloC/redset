@@ -38,8 +38,6 @@
 #include "redset_internal.h"
 #include "redset_util.h"
 
-#define REDSET_VERSION "1.0"
-
 size_t redset_page_size;
 
 /* allocate size bytes, returns NULL if size == 0,
