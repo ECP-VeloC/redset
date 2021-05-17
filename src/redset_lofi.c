@@ -474,6 +474,11 @@ int redset_lofi_close(redset_lofi* rsf)
     redset_free(&rsf->filenames[i]);
   }
 
+  /* free memory allocated for file descriptors, names, and sizes */
+  redset_free(&rsf->fds);
+  redset_free(&rsf->filenames);
+  redset_free(&rsf->filesizes);
+
   return rc;
 }
 
