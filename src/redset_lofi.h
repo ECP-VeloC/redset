@@ -43,6 +43,9 @@ int redset_lofi_pwrite(redset_lofi* rsf, void* buf, size_t count, off_t offset);
 int redset_lofi_close(redset_lofi* rsf);
 
 /* given a hash that defines a set of files, apply metadata recorded to each file */
+int redset_lofi_apply_meta_mapped(kvtree* hash, const kvtree* map);
+
+/* given a hash that defines a set of files, apply metadata recorded to each file */
 int redset_lofi_apply_meta(kvtree* hash);
 
 #endif /* REDSET_LOFI_H */

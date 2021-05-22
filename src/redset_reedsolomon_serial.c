@@ -172,7 +172,7 @@ static int redset_recover_rs_rebuild_serial(
   size_t chunk_size,
   int cksums)
 {
-  int i, j;
+  int i;
   int rc = REDSET_SUCCESS;
 
   /* prepare our Galois Field tables and encoding matrix */

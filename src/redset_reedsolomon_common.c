@@ -222,6 +222,7 @@ static void gf_premult_table(
   return;
 }
 
+#if 0
 static void print_matrix(int* mat, int rows, int cols)
 {
   int row, col;
@@ -233,6 +234,7 @@ static void print_matrix(int* mat, int rows, int cols)
   }
   printf("\n"); fflush(stdout);
 }
+#endif
 
 /* given matrix in mat of size (rows x cols) swap columns a and b */
 static void swap_columns(unsigned int* mat, int rows, int cols, int a, int b)

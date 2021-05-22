@@ -33,6 +33,7 @@
 #include <zlib.h>
 
 #include "kvtree.h"
+#include "kvtree_util.h"
 
 #include "redset.h"
 #include "redset_internal.h"

@@ -761,7 +761,6 @@ int redset_recover_partner_rebuild(
         unsigned long outgoing = incoming[i];
 
         /* send the data */
-        unsigned long offset = 0;
         while (received[i] < outgoing) {
           /* compute number of bytes for this step */
           size_t count = (size_t) (outgoing - received[i]);

@@ -395,7 +395,6 @@ int redset_recover_xor_rebuild(
   int root)
 {
   int rc = REDSET_SUCCESS;
-  int i;
   MPI_Status status[2];
 
   redset_lofi rsf;
@@ -411,7 +410,7 @@ int redset_recover_xor_rebuild(
   /* allocate hash object to read in (or receive) the header of the XOR file */
   kvtree* header = kvtree_new();
 
-  int num_files = -1;
+  //int num_files = -1;
   kvtree* current_hash = NULL;
   if (root != d->rank) {
     /* open our xor file for reading */
@@ -641,7 +640,6 @@ int redset_recover_xor(
   const char* name,
   const redset_base* d)
 {
-  int i;
   MPI_Comm comm_world = d->parent_comm;
 
   /* assume we have our files */

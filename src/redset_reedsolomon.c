@@ -550,12 +550,10 @@ int redset_recover_rs_rebuild(
   /* TODO: pass this in as a parameter? */
   /* determine whether we need to rebuild */
   int need_rebuild = 0;
-  int missing_index = -1;
   for (i = 0; i < missing; i++) {
     if (rebuild_ranks[i] == d->rank) {
       /* we are one of the ranks who needs to rebuild our files */
       need_rebuild = 1;
-      missing_index = i;
     }
   }
 

@@ -16,6 +16,7 @@
 #include "mpi.h"
 
 #include "redset.h"
+#include "redset_io.h"
 
 /* compute MPI_LAND of value across all procs,
  * return 1 if value is 1 on all procs, 0 otherwise */
