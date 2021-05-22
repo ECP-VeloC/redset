@@ -1010,8 +1010,6 @@ int redset_apply(
   const char* name,
   const redset dvp)
 {
-  int i;
-
   /* get pointer to redset structure */
   redset_base* d = (redset_base*) dvp;
 
@@ -1021,15 +1019,15 @@ int redset_apply(
   MPI_Comm_rank(comm_world, &rank_world);
   MPI_Comm_size(comm_world, &nranks_world);
 
+#if 0
   /* start timer */
   double time_start;
   if (rank_world == 0) {
     time_start = MPI_Wtime();
   }
+#endif
 
-  /* initialize to 0 */
-  double bytes = 0.0;
-
+#if 0
   /* step through each of my files for the specified dataset
    * to scan for any incomplete files */
   double my_bytes = 0.0;
@@ -1045,6 +1043,7 @@ int redset_apply(
     /* add up the number of bytes on our way through */
     my_bytes += (double) file_size;
   }
+#endif
 
   /* TODO: determine whether everyone's files are good */
 
@@ -1079,7 +1078,9 @@ int redset_apply(
     return rc = REDSET_FAILURE;
   }
 
+#if 0
   /* add up total number of bytes */
+  double bytes = 0.0;
   MPI_Allreduce(&my_bytes, &bytes, 1, MPI_DOUBLE, MPI_SUM, comm_world);
 
   /* stop timer and report performance info */
@@ -1096,6 +1097,7 @@ int redset_apply(
 
     // TODO: log or report cost somewhere
   }
+#endif
 
   return rc;
 }
@@ -1203,6 +1205,7 @@ int redset_unapply(
   return REDSET_SUCCESS;
 }
 
+#if 0
 static int redset_from_dir(
   MPI_Comm comm_world,
   const char* name,
@@ -1232,6 +1235,7 @@ static int redset_from_dir(
 
   return rc;
 }
+#endif
 
 /* returns a list of files added by redundancy descriptor */
 redset_filelist redset_filelist_get(

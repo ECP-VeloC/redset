@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include "redset.h"
 #include "redset_util.h"
 #include "redset_internal.h"

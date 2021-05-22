@@ -20,6 +20,7 @@
 #include <zlib.h>
 
 #include "kvtree.h"
+#include "kvtree_util.h"
 
 #include "redset.h"
 #include "redset_internal.h"
@@ -252,7 +253,7 @@ int redset_lofi_check_mapped(const kvtree* hash, const kvtree* map)
     }
   
     /* get name of file we're opening */
-    const char* file_name_mapped = file;
+    char* file_name_mapped = (char*) file;
     if (map != NULL) {
       if (kvtree_util_get_str(map, file, &file_name_mapped) != KVTREE_SUCCESS) {
         /* given a map, but we failed to find this file in the map */
@@ -347,7 +348,7 @@ int redset_lofi_open_mapped(const kvtree* hash, const kvtree* map, int flags, mo
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
     /* get name of file we're opening */
-    const char* file_name_mapped = file_name;
+    char* file_name_mapped = (char*) file_name;
     if (map != NULL) {
       if (kvtree_util_get_str(map, file_name, &file_name_mapped) != KVTREE_SUCCESS) {
         /* given a map, but we failed to find this file in the map */
@@ -483,7 +484,7 @@ int redset_lofi_close(redset_lofi* rsf)
 }
 
 /* given a hash that defines a set of files, apply metadata recorded to each file */
-int redset_lofi_apply_meta_mapped(kvtree* hash, kvtree* map)
+int redset_lofi_apply_meta_mapped(kvtree* hash, const kvtree* map)
 {
   if (hash == NULL) {
     return REDSET_FAILURE;
@@ -513,7 +514,7 @@ int redset_lofi_apply_meta_mapped(kvtree* hash, kvtree* map)
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
     /* get name of file we're opening */
-    const char* file_name_mapped = file_name;
+    char* file_name_mapped = (char*) file_name;
     if (map != NULL) {
       if (kvtree_util_get_str(map, file_name, &file_name_mapped) != KVTREE_SUCCESS) {
         /* given a map, but we failed to find this file in the map */

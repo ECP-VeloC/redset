@@ -88,9 +88,6 @@ int redset_apply_single(
   const char* name,
   const redset_base* d)
 {
-  int i;
-  MPI_Comm comm_world = d->parent_comm;
-
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
 
