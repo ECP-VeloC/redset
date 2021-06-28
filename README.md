@@ -1,6 +1,6 @@
 # Overview
 
-[![Build Status](https://api.travis-ci.org/ECP-VeloC/redset.png?branch=master)](https://travis-ci.org/ECP-VeloC/redset)
+[![Build Status](https://api.travis-ci.org/ECP-VeloC/redset.png?branch=main)](https://travis-ci.org/ECP-VeloC/redset)
 
 This module lets one create one or more redundancy descriptors,
 which then may be applied to a set of files distributed across a group of processes.
