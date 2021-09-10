@@ -1,3 +1,16 @@
+/* to get nsec fields in stat structure */
+#define _GNU_SOURCE
+
+/* TODO: ugly hack until we get a configure test */
+#if defined(__APPLE__)
+#define HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC 1
+#else
+#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
+#endif
+// HAVE_STRUCT_STAT_ST_MTIME_N
+// HAVE_STRUCT_STAT_ST_UMTIME
+// HAVE_STRUCT_STAT_ST_MTIME_USEC
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -7,6 +20,7 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include <limits.h>
 #include <unistd.h>
@@ -85,6 +99,118 @@ int create_files(int count, const char** filelist)
 
   free(buf);
   return 0;
+}
+
+static void get_atimes(const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_atime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_atim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_atime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_uatime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_atime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+static void get_mtimes (const struct stat* sb, uint64_t* secs, uint64_t* nsecs)
+{
+    *secs = (uint64_t) sb->st_mtime;
+
+#if HAVE_STRUCT_STAT_ST_MTIMESPEC_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtimespec.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC
+    *nsecs = (uint64_t) sb->st_mtim.tv_nsec;
+#elif HAVE_STRUCT_STAT_ST_MTIME_N
+    *nsecs = (uint64_t) sb->st_mtime_n;
+#elif HAVE_STRUCT_STAT_ST_UMTIME
+    *nsecs = (uint64_t) sb->st_umtime * 1000;
+#elif HAVE_STRUCT_STAT_ST_MTIME_USEC
+    *nsecs = (uint64_t) sb->st_mtime_usec * 1000;
+#else
+    *nsecs = 0;
+#endif
+}
+
+int set_meta(int count, const char** filelist)
+{
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  /* set some metadata properties to be different values on different ranks */
+  int i;
+  for (i = 0; i < count; i++) {
+    const char* name = filelist[i];
+
+    /* TODO: would be nice to set a different group */
+
+    /* set file permissions based on rank */
+    mode_t bits = 0777 & ~(1 << ((rank + i) % 9));
+    chmod(name, bits);
+
+    /* set atime and mtime to specific values */
+    struct timespec times[2];
+    times[0].tv_sec  = (time_t) rank * 100 + i;
+    times[0].tv_nsec = (long)   rank + i;
+    times[1].tv_sec  = (time_t) (rank+1) * 1000 + i;
+    times[1].tv_nsec = (long)   (rank+1) + i;
+
+    /* set times with nanosecond precision using utimensat,
+     * assume path is relative to current working directory,
+     * if it's not absolute, and set times on link (not target file)
+     * if dest_path refers to a link */
+    utimensat(AT_FDCWD, name, times, AT_SYMLINK_NOFOLLOW);
+  }
+
+  return 0;
+}
+
+void check_meta(int count, const char** filelist)
+{
+  int rank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  int i;
+  for (i = 0; i < count; i++) {
+    const char* file = filelist[i];
+
+    struct stat statbuf;
+    int rc = redset_stat(file, &statbuf);
+    if (rc == 0) {
+      mode_t expected_bits = 0777 & ~(1 << ((rank + i) % 9));
+      mode_t bits = statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO);
+      if (bits != expected_bits) {
+        ABORT("Failed check of permission bits for %s", file);
+      }
+
+      uint64_t asecs  = rank * 100 + i;
+      uint64_t ansecs = rank + i;
+      uint64_t msecs  = (rank+1) * 1000 + i;
+      uint64_t mnsecs = (rank+1) + i;
+
+      uint64_t secs, nsecs;
+#if 0
+      // TODO: this could be supported, but redset needs to restore atime
+      // avoid checking atime since just reading the file updates it
+      get_atimes(&statbuf, &secs, &nsecs);
+      if (secs != asecs || nsecs != ansecs) {
+        ABORT("Failed check of atime for %s", file);
+      }
+#endif
+
+      get_mtimes(&statbuf, &secs, &nsecs);
+      if (secs != msecs || nsecs != mnsecs) {
+        ABORT("Failed check of mtime for %s", file);
+      }
+    }
+  }
 }
 
 void init_crcs(int count, const char** filelist, uLong* crcvals)
@@ -214,6 +340,8 @@ int test_apply(int mode, int k, int filecount, const char** filelist, uLong* crc
 
   check_for_redundancy_files(mode, path, d);
 
+  check_meta(filecount, filelist);
+
   check_crcs(filecount, filelist, crcvals);
 
   return rc;
@@ -288,6 +416,8 @@ int test_recover_no_loss(int mode, const char* path, int filecount, const char**
     ABORT("failed to delete redundancy descriptor");
   }
 
+  check_meta(filecount, filelist);
+
   check_crcs(filecount, filelist, crcvals);
 
   return rc;
@@ -347,9 +477,9 @@ int test_recover_loss_k_ranks(int mode, int apply_k, const char* path, int count
   while (! done) {
     /* delete files on rank 0 */
     if (rank == 0) {
-      printf("mode = %d: deleting ranks = ", mode); 
+      printf("mode = %d: deleting ranks = ", mode);
       for (i = 0; i < k; i++) {
-        printf("%d, ", index[i]); 
+        printf("%d, ", index[i]);
       }
       printf("\n");
       fflush(stdout);
@@ -359,13 +489,13 @@ int test_recover_loss_k_ranks(int mode, int apply_k, const char* path, int count
         delete_files(count, filelist);
       }
     }
-  
+
     double start = MPI_Wtime();
 
     redset d;
     int redset_rc = redset_recover(comm, path, &d);
     int recovered = alltrue(redset_rc == REDSET_SUCCESS, comm);
-  
+
     double end = MPI_Wtime();
     if (rank == 0) {
       printf("mode = %d: Recover time (protect %d ranks, lost %d ranks): %f\n", mode, apply_k, k, (end - start));
@@ -381,20 +511,21 @@ int test_recover_loss_k_ranks(int mode, int apply_k, const char* path, int count
       }
     } else {
       if (recovered) {
+        check_meta(count, filelist);
         check_crcs(count, filelist, crcvals);
       } else {
         ABORT("recover failed");
       }
-  
+
       check_for_redundancy_files(mode, path, d);
     }
-  
+
     if (rc == 0 && recovered) {
       /* delete files on rank 0 */
       if (rank == 0) {
-        printf("mode = %d: deleting ranks and redundancy = ", mode); 
+        printf("mode = %d: deleting ranks and redundancy = ", mode);
         for (i = 0; i < k; i++) {
-          printf("%d, ", index[i]); 
+          printf("%d, ", index[i]);
         }
         printf("\n");
         fflush(stdout);
@@ -419,7 +550,7 @@ int test_recover_loss_k_ranks(int mode, int apply_k, const char* path, int count
 
     redset_rc = redset_recover(comm, path, &d);
     recovered = alltrue(redset_rc == REDSET_SUCCESS, comm);
-  
+
     if ((mode == REDSET_COPY_SINGLE  && k > 0)       ||
         (mode == REDSET_COPY_PARTNER && k > apply_k) ||
         (mode == REDSET_COPY_XOR     && k > 1)       ||
@@ -430,14 +561,15 @@ int test_recover_loss_k_ranks(int mode, int apply_k, const char* path, int count
       }
     } else {
       if (recovered) {
+        check_meta(count, filelist);
         check_crcs(count, filelist, crcvals);
       } else {
         ABORT("recover failed");
       }
-  
+
       check_for_redundancy_files(mode, path, d);
     }
-  
+
     if (redset_delete(&d) != REDSET_SUCCESS) {
       ABORT("failed to delete redundancy descriptor");
     }
@@ -484,6 +616,7 @@ int test_sequence(int copymode, const char* group, int filecount, const char** f
     for (lose_k = 0; lose_k < ranks; lose_k++) {
       create_files(filecount, filelist);
       init_crcs(filecount, filelist, crcvals);
+      set_meta(filecount, filelist);
 
       redset d;
       switch (copymode) {
