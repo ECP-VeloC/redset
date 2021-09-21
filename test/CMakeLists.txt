@@ -20,7 +20,7 @@ REDSET_ADD_TEST_PARALLEL(redset_test 256 "")
 
 ADD_EXECUTABLE(test_config test_config.c)
 TARGET_LINK_LIBRARIES(test_config ${REDSET_EXTERNAL_LIBS} ${redset_lib})
-REDSET_ADD_TEST_SERIAL(redset_test 256 "")
+REDSET_ADD_TEST_SERIAL(test_config 256 "")
 #ADD_TEST(NAME test_config COMMAND ${MPIEXEC} ${MPIEXEC_NUMPROC_FLAG} 1 ./test_config)
 
 ####################
