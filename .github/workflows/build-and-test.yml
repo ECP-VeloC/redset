@@ -1,0 +1,43 @@
+name: redset build and test
+
+permissions:
+  actions: write
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        target: [Debug, Release]
+        mpi: [seq, par]
+
+    name: ${{ matrix.os }}-${{ matrix.target }}-${{ matrix.mpi }}
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+
+      - name: checkout
+        uses: actions/checkout@v2
+        with:
+          path: redset
+          fetch-depth: 0
+
+      - name: get deps
+        uses: ecp-veloc/github-actions/get-scr-os-deps@main
+        with:
+          os: ${{ matrix.os }}
+          mpi: ${{ matrix.mpi }}
+
+      - name: build and test
+        uses: ecp-veloc/github-actions/cmake-build-test@main
+        with:
+          component: redset
+          target: ${{ matrix.target }}
+          cmake_line: "-DMPI=${{ matrix.mpi == 'par' }} -DBUILD_SHARED_LIBS=ON -DREDSET_LINK_STATIC=ON"
