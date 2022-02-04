@@ -1,4 +1,4 @@
-name: redset build and test
+name: redset build
 
 permissions:
   actions: write
@@ -44,7 +44,7 @@ jobs:
           component: rankstr
 
       - name: build and test
-        uses: ecp-veloc/github-actions/cmake-build-test@main
+        uses: ecp-veloc/github-actions/cmake-build@main
         with:
           component: redset
           target: ${{ matrix.target }}
