@@ -15,9 +15,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         target: [Debug, Release]
-        mpi: [seq, par]
 
-    name: ${{ matrix.os }}-${{ matrix.target }}-${{ matrix.mpi }}
+    name: ${{ matrix.os }}-${{ matrix.target }}
 
     runs-on: ${{ matrix.os }}
 
@@ -33,11 +32,20 @@ jobs:
         uses: ecp-veloc/github-actions/get-scr-os-deps@main
         with:
           os: ${{ matrix.os }}
-          mpi: ${{ matrix.mpi }}
+
+      - name: install kvtree
+        uses: ecp-veloc/github-actions/build-ecp-veloc-component@main
+        with:
+          component: kvtree
+
+      - name: install rankstr
+        uses: ecp-veloc/github-actions/build-ecp-veloc-component@main
+        with:
+          component: rankstr
 
       - name: build and test
         uses: ecp-veloc/github-actions/cmake-build-test@main
         with:
           component: redset
           target: ${{ matrix.target }}
-          cmake_line: "-DMPI=${{ matrix.mpi == 'par' }} -DBUILD_SHARED_LIBS=ON -DREDSET_LINK_STATIC=ON"
+          cmake_line: "-DBUILD_SHARED_LIBS=ON -DREDSET_LINK_STATIC=ON"
