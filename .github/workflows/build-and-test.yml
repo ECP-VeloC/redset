@@ -1,4 +1,4 @@
-name: redset build
+name: redset build only
 
 permissions:
   actions: write
@@ -43,7 +43,7 @@ jobs:
         with:
           component: rankstr
 
-      - name: build and test
+      - name: build only
         uses: ecp-veloc/github-actions/cmake-build@main
         with:
           component: redset
