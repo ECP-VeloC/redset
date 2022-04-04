@@ -38,6 +38,7 @@ LIST(APPEND libredset_srcs
 
 # REDSET Library
 ADD_LIBRARY(redset_o OBJECT ${libredset_srcs})
+ADD_LIBRARY(redset_noMPI_o OBJECT ${redset_noMPI_srcs})
 
 IF(BUILD_SHARED_LIBS)
    ADD_LIBRARY(redset SHARED $<TARGET_OBJECTS:redset_o>)
@@ -58,12 +59,12 @@ INSTALL(TARGETS redset-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 # Non-MPI library for CLI
 if (BUILD_SHARED_LIBS)
-   ADD_LIBRARY(redset_base SHARED ${redset_noMPI_srcs})
+  ADD_LIBRARY(redset_base SHARED $<TARGET_OBJECTS:redset_noMPI_o>)
    TARGET_LINK_LIBRARIES(redset_base ${REDSET_SERIAL_LIBS})
    INSTALL(TARGETS redset_base DESTINATION ${CMAKE_INSTALL_LIBDIR})
 endif()
 
-ADD_LIBRARY(redset_base-static STATIC ${redset_noMPI_srcs})
+ADD_LIBRARY(redset_base-static STATIC $<TARGET_OBJECTS:redset_noMPI_o>)
 TARGET_LINK_LIBRARIES(redset_base-static ${REDSET_SERIAL_LIBS})
 SET_TARGET_PROPERTIES(redset_base-static PROPERTIES OUTPUT_NAME redset_base CLEAN_DIRECT_OUTPUT 1)
 INSTALL(TARGETS redset_base-static DESTINATION ${CMAKE_INSTALL_LIBDIR})
