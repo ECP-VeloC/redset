@@ -8,9 +8,9 @@ INCLUDE_DIRECTORIES(${PROJECT_BINARY_DIR})
 ################
 
 IF(REDSET_LINK_STATIC)
-   SET(redset_lib redset-static)
+   SET(redset_lib redset::redset-static)
 ELSE()
-   SET(redset_lib redset)
+   SET(redset_lib redset::redset)
 ENDIF()
 
 ADD_EXECUTABLE(redset_test test_redset.c)
