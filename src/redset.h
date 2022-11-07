@@ -1,7 +1,9 @@
 #ifndef REDSET_H
 #define REDSET_H
 
+#ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
+#endif
 
 /** \defgroup redset Redset
  *  \brief Redundancy encoding file sets
@@ -79,6 +81,7 @@ kvtree* redset_config(
   const kvtree *config /** < [IN] - options to be set */
 );
 
+#ifdef REDSET_ENABLE_MPI
 /** create a new redundancy set descriptor */
 int redset_create(
   int type,          /**< [IN]  - redundancy encoding type: one of REDSET_COPY values */
@@ -119,6 +122,7 @@ int redset_create_rs(
   int k,             /**< [IN]  - number of encoding blocks [1,size) */
   redset* d          /**< [OUT] - output redundancy descriptor */
 );
+#endif
 
 /** free any memory associated with the specified redundancy descriptor */
 int redset_delete(
@@ -134,6 +138,7 @@ int redset_apply(
   const redset d      /**< [IN] - redundancy decriptor to be applied */
 );
 
+#ifdef REDSET_ENABLE_MPI
 /** rebuilds files for specified dataset id using specified redundancy descriptor,
  * adds them to filemap, and returns REDSET_SUCCESS if all processes succeeded */
 int redset_recover(
@@ -141,6 +146,7 @@ int redset_recover(
   const char* name, /**< [IN]  - path/filename prefix to prepend to redset metadata files */
   redset* d         /**< [OUT] - output redundancy descriptor */
 );
+#endif
 
 /** deletes redundancy data that was added in redset_apply,
  * which is useful when cleaning up */

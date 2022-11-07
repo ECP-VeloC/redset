@@ -5,7 +5,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
+#endif
 #include "kvtree.h"
 
 #define REDSET_FAILURE (1)
@@ -50,6 +52,7 @@ void* redset_align_malloc(size_t size, size_t align);
 /** frees a blocked allocated with a call to redset_align_malloc */
 void redset_align_free(void* buf);
 
+#ifdef REDSET_ENABLE_MPI
 /** sends a NUL-terminated string to a process,
  * allocates space and recieves a NULL-terminated string from a process,
  * can specify MPI_PROC_NULL as either send or recv rank */
@@ -61,6 +64,7 @@ int redset_str_sendrecv(
 
 /** returns true (non-zero) if flag on each process in comm is true */
 int redset_alltrue(int flag, MPI_Comm comm);
+#endif
 
 /* recursively sort a kvtree in alphabetical order */
 void redset_sort_kvtree(kvtree* hash);

@@ -6,11 +6,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
+#endif
 
 #include "kvtree.h"
 #include "kvtree_util.h"
+#ifdef REDSET_ENABLE_MPI
 #include "kvtree_mpi.h"
+#endif
 
 #include "redset_io.h"
 #include "redset_util.h"
@@ -484,7 +488,7 @@ void redset_rs_gaussian_solve_identify_rows(
 
     /* check each checksum row,
      * if this unknown is defined in this row,
-     * and if this row has fewer unknowns, select it */   
+     * and if this row has fewer unknowns, select it */
     for (row = 0; row < k; row++) {
       /* skip this row if it's already used */
       if (assigned[row]) {

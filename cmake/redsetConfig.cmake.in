@@ -1,0 +1,10 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(kvtree REQUIRED)
+find_dependency(rankstr REQUIRED)
+find_dependency(MPI REQUIRED)
+find_dependency(ZLIB REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/redsetTargets.cmake")

@@ -29,8 +29,10 @@ typedef struct {
   int      enabled;        /* flag indicating whether this descriptor is active */
   int      type;           /* redundancy scheme to apply */
   void*    state;          /* pointer to extra state depending on copy type */
+#ifdef REDSET_ENABLE_MPI
   MPI_Comm parent_comm;    /* parent communicator */
   MPI_Comm comm;           /* communicator holding procs for this scheme */
+#endif
   int      groups;         /* number of redundancy sets */
   int      group_id;       /* unique id assigned to this redundancy set */
   int      ranks;          /* number of ranks in this set */
@@ -83,11 +85,13 @@ typedef struct {
 /** default set size for redset to use */
 extern int redset_set_size;
 
+#ifdef REDSET_ENABLE_MPI
 int redset_set_partners(
   MPI_Comm parent_comm, MPI_Comm comm, int dist,
   int* lhs_rank, int* lhs_rank_world, char** lhs_hostname,
   int* rhs_rank, int* rhs_rank_world, char** rhs_hostname
 );
+#endif
 
 /* convert the specified redundancy descritpor into a corresponding
  * kvtree */
@@ -111,6 +115,7 @@ int redset_meta_encode(const char* file, kvtree* meta);
 /* apply file metadata in meta to file */
 int redset_meta_apply(const char* file, const kvtree* meta);
 
+#ifdef REDSET_ENABLE_MPI
 int redset_construct_partner(
   MPI_Comm parent_comm,
   redset_base* d,
@@ -127,6 +132,7 @@ int redset_construct_rs(
   redset_base* d,
   int encoding
 );
+#endif
 
 int redset_delete_partner(
   redset_base* d
