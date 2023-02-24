@@ -14,11 +14,11 @@ ELSE()
 ENDIF()
 
 ADD_EXECUTABLE(redset_test test_redset.c)
-TARGET_LINK_LIBRARIES(redset_test ${REDSET_EXTERNAL_LIBS} ${redset_lib})
+TARGET_LINK_LIBRARIES(redset_test ${redset_lib})
 REDSET_ADD_TEST_PARALLEL(redset_test 256 "")
 
 ADD_EXECUTABLE(test_config test_config.c)
-TARGET_LINK_LIBRARIES(test_config ${REDSET_EXTERNAL_LIBS} ${redset_lib})
+TARGET_LINK_LIBRARIES(test_config ${redset_lib})
 REDSET_ADD_TEST_SERIAL(test_config 256 "")
 
 ####################
