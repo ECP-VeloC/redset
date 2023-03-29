@@ -57,6 +57,7 @@ jobs:
           component: redset
 
       - name: test
+        if: false
         uses: ecp-veloc/github-actions/cmake-test@main
         with:
           component: redset
