@@ -15,8 +15,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         target: [Debug, Release]
+        static: [both, static]
 
-    name: ${{ matrix.os }}-${{ matrix.target }}
+    name: ${{ matrix.os }}-${{ matrix.target }}-${{ matrix.static }}
 
     runs-on: ${{ matrix.os }}
 
@@ -43,14 +44,19 @@ jobs:
         with:
           component: rankstr
 
-      - name: build static
-        uses: ecp-veloc/github-actions/cmake-build-static@main
+      - name: configure
+        uses: ecp-veloc/github-actions/cmake-configure@main
         with:
           component: redset
           target: ${{ matrix.target }}
+          static: ${{ matrix.static == 'static' }}
 
-      - name: build only
-        uses: ecp-veloc/github-actions/cmake-build-only@main
+      - name: build
+        uses: ecp-veloc/github-actions/cmake-build@main
         with:
           component: redset
-          target: ${{ matrix.target }}
+
+      - name: test
+        uses: ecp-veloc/github-actions/cmake-test@main
+        with:
+          component: redset
