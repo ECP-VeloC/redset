@@ -1,5 +1,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
 PROJECT(REDSET VERSION 0.3.0)
+PROJECT(REDSET LANGUAGES CXX CUDA)
 
 # Mac rpath Policy
 IF(POLICY CMP0042)
@@ -49,6 +50,14 @@ LIST(APPEND REDSET_EXTERNAL_STATIC_LIBS rankstr::rankstr-static)
 ## MPI
 INCLUDE(SetupMPI)
 IF(MPI_C_FOUND)
+    # HACK: IBM MPI compiler wrappers add -pthread, which trips up nvcc.
+    # A work around is to just drop it.
+    GET_TARGET_PROPERTY(MPI_C_TMP MPI::MPI_C INTERFACE_LINK_LIBRARIES)
+    STRING(REPLACE " -pthread" "" MPI_C_TMP "${MPI_C_TMP}")
+    SET_TARGET_PROPERTIES(MPI::MPI_C PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${MPI_C_TMP}"
+    )
+
     LIST(APPEND REDSET_EXTERNAL_LIBS MPI::MPI_C)
     LIST(APPEND REDSET_EXTERNAL_STATIC_LIBS MPI::MPI_C)
 ELSE(MPI_C_FOUND)
@@ -95,13 +104,13 @@ INSTALL(EXPORT redsetTargets FILE redsetTargets.cmake NAMESPACE redset:: DESTINA
 # Export so we can use in-tree
 EXPORT(EXPORT redsetTargets NAMESPACE redset:: FILE redsetTargets.cmake)
 
-# Setup the package config
-INCLUDE(CMakePackageConfigHelpers)
-CONFIGURE_PACKAGE_CONFIG_FILE(cmake/redsetConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake INSTALL_DESTINATION share/redset/cmake)
-WRITE_BASIC_PACKAGE_VERSION_FILE(${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake COMPATIBILITY SameMajorVersion)
-
-# Install package config
-INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake DESTINATION share/redset/cmake)
+## Setup the package config
+#INCLUDE(CMakePackageConfigHelpers)
+#CONFIGURE_PACKAGE_CONFIG_FILE(cmake/redsetConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake INSTALL_DESTINATION share/redset/cmake)
+#WRITE_BASIC_PACKAGE_VERSION_FILE(${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake COMPATIBILITY SameMajorVersion)
+#
+## Install package config
+#INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake DESTINATION share/redset/cmake)
 
 # Package
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "REDSET Redundancy Set for encoding/decoding a set of files")
