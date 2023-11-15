@@ -31,11 +31,19 @@ LIST(APPEND libredset_srcs
     redset.c
     redset_single.c
     redset_partner.c
-    #redset_xor.c
-    redset_xor.cu
     redset_reedsolomon_common.c
     redset_reedsolomon.c
 )
+
+IF(ENABLE_CUDA)
+    LIST(APPEND libredset_srcs
+        redset_xor.cu
+    )
+ELSE(ENABLE_CUDA)
+    LIST(APPEND libredset_srcs
+        redset_xor.c
+    )
+ENDIF(ENABLE_CUDA)
 
 IF(BUILD_SHARED_LIBS)
    # REDSET Library
