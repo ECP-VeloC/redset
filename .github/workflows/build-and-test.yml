@@ -35,7 +35,7 @@ jobs:
           os: ${{ matrix.os }}
 
       - name: get nvcc (Linux)
-        if: startsWith(inputs.os, 'ubuntu')
+        if: startsWith(matrix.os, 'ubuntu')
         shell: bash
         run: |
           sudo apt-get install nvidia-cuda-toolkit
