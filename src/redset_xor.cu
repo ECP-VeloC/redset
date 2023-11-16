@@ -225,7 +225,6 @@ int redset_apply_xor(
   const redset_base* d)
 {
   int rc = REDSET_SUCCESS;
-  int i;
 
   /* pick out communicator */
   MPI_Comm comm = d->comm;
@@ -386,6 +385,7 @@ int redset_apply_xor(
         xor_gpu<<<nblocks, nthreads>>>(send_buf, recv_buf, count);
         cudaDeviceSynchronize();
 #else
+        int i;
         for (i = 0; i < count; i++) {
           send_buf[i] ^= recv_buf[i];
         }
@@ -622,7 +622,6 @@ int redset_recover_xor_rebuild(
 
         /* if not start of pipeline, receive data from left and xor with my own */
         if (root != state->lhs_rank) {
-          int i;
           MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
 #if ENABLE_CUDA
           int nthreads = 1024;
@@ -630,6 +629,7 @@ int redset_recover_xor_rebuild(
           xor_gpu<<<nblocks, nthreads>>>(send_buf, recv_buf, count);
           cudaDeviceSynchronize();
 #else
+          int i;
           for (i = 0; i < count; i++) {
             send_buf[i] ^= recv_buf[i];
           }
