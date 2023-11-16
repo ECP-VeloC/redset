@@ -34,11 +34,11 @@ jobs:
         with:
           os: ${{ matrix.os }}
 
-      - name: get nvcc (Linux)
-        if: startsWith(matrix.os, 'ubuntu')
-        shell: bash
-        run: |
-          sudo apt-get install nvidia-cuda-toolkit
+      #- name: get nvcc (Linux)
+      #  if: startsWith(matrix.os, 'ubuntu')
+      #  shell: bash
+      #  run: |
+      #    sudo apt-get install nvidia-cuda-toolkit
 
       - name: install kvtree
         uses: ecp-veloc/github-actions/build-ecp-veloc-component@main
