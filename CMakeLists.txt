@@ -1,5 +1,4 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
-PROJECT(REDSET VERSION 0.3.0)
 
 # Mac rpath Policy
 IF(POLICY CMP0042)
@@ -34,9 +33,9 @@ OPTION(ENABLE_TESTS "Whether to build tests" ON)
 MESSAGE(STATUS "ENABLE_TESTS: ${ENABLE_TESTS}")
 
 IF(ENABLE_CUDA)
-    PROJECT(REDSET LANGUAGES C CUDA)
+    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C CUDA)
 ELSE(ENABLE_CUDA)
-    PROJECT(REDSET LANGUAGES C)
+    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C)
 ENDIF(ENABLE_CUDA)
 
 # Find Packages & Files
@@ -114,13 +113,13 @@ INSTALL(EXPORT redsetTargets FILE redsetTargets.cmake NAMESPACE redset:: DESTINA
 # Export so we can use in-tree
 EXPORT(EXPORT redsetTargets NAMESPACE redset:: FILE redsetTargets.cmake)
 
-## Setup the package config
-#INCLUDE(CMakePackageConfigHelpers)
-#CONFIGURE_PACKAGE_CONFIG_FILE(cmake/redsetConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake INSTALL_DESTINATION share/redset/cmake)
-#WRITE_BASIC_PACKAGE_VERSION_FILE(${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake COMPATIBILITY SameMajorVersion)
-#
-## Install package config
-#INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake DESTINATION share/redset/cmake)
+# Setup the package config
+INCLUDE(CMakePackageConfigHelpers)
+CONFIGURE_PACKAGE_CONFIG_FILE(cmake/redsetConfig.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake INSTALL_DESTINATION share/redset/cmake)
+WRITE_BASIC_PACKAGE_VERSION_FILE(${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake COMPATIBILITY SameMajorVersion)
+
+# Install package config
+INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/redsetConfig.cmake ${CMAKE_CURRENT_BINARY_DIR}/redsetConfigVersion.cmake DESTINATION share/redset/cmake)
 
 # Package
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "REDSET Redundancy Set for encoding/decoding a set of files")
