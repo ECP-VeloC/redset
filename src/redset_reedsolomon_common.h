@@ -1,6 +1,10 @@
 #ifndef REDSET_REEDSOLOMON_COMMON_H
 #define REDSET_REEDSOLOMON_COMMON_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* given a pointer to a reed-solomon state structure,
  * number of ranks, requested encoding checksums, and number of bits
  * to determine the number of Galois Field elements, allocate structures
@@ -85,5 +89,9 @@ void redset_rs_reduce_decode(
   unsigned char* recv_buf,
   unsigned char** data_bufs
 );
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
 
 #endif
