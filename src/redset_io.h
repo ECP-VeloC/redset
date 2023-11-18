@@ -22,6 +22,10 @@
 /** \name Basic File I/O */
 ///@{
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /** returns user's current mode as determine by his umask */
 mode_t redset_getmode(int read, int write, int execute);
 
@@ -127,5 +131,9 @@ int redset_compress(const char* file_src, const char* file_dst, unsigned long bl
 /** uncompress the specified file and store as file_dst */
 int redset_uncompress(const char* file_src, const char* file_dst);
 ///@}
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
 
 #endif

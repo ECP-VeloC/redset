@@ -1,6 +1,10 @@
 #ifndef REDSET_UTIL_H
 #define REDSET_UTIL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -74,5 +78,9 @@ void** redset_buffers_alloc(int num, size_t size);
 
 /* free a set of buffers allocated in redset_buffers_alloc */
 void redset_buffers_free(int num, void* pbufs);
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
 
 #endif

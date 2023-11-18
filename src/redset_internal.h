@@ -1,6 +1,10 @@
 #ifndef REDSET_INTERNAL_H
 #define REDSET_INTERNAL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "kvtree.h"
 
 #include "redset.h"
@@ -280,5 +284,9 @@ redset_list* redset_filelist_get_rs(
   const char* name,
   redset_base* d
 );
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
 
 #endif /* REDSET_INTERNAL_H */

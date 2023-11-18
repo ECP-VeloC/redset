@@ -1,6 +1,10 @@
 #ifndef REDSET_LOFI_H
 #define REDSET_LOFI_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* structure to track an ordered set of files and operate on
  * them as one logical, continuous file */
 typedef struct {
@@ -47,5 +51,9 @@ int redset_lofi_apply_meta_mapped(kvtree* hash, const kvtree* map);
 
 /* given a hash that defines a set of files, apply metadata recorded to each file */
 int redset_lofi_apply_meta(kvtree* hash);
+
+#ifdef __cplusplus
+} /* extern C */
+#endif
 
 #endif /* REDSET_LOFI_H */
