@@ -6,6 +6,15 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <pthread.h>
+
+/* get_nprocs() */
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+
 #include "mpi.h"
 
 #include "kvtree.h"
@@ -24,6 +33,309 @@
 Distribute and file rebuild functions
 =========================================
 */
+
+/* Linux and OSX compatible 'get number of hardware threads' */
+unsigned int redset_get_nprocs(void)
+{
+  unsigned int cpu_threads;
+
+#if defined(__APPLE__)
+  int count;
+  size_t size = sizeof(count);
+  if (sysctlbyname("hw.ncpu", &count, &size, NULL, 0)) {
+      cpu_threads = 1;
+  } else {
+      cpu_threads = count;
+  }
+#else
+  cpu_threads = get_nprocs();
+#endif
+
+  return cpu_threads;
+}
+
+typedef struct {
+  int rank;
+  unsigned char* a;
+  unsigned char* b;
+  size_t n;
+
+  pthread_mutex_t mutex;
+
+  int done;
+  int main_waiting;
+  int thread_waiting;
+  pthread_cond_t cond_main;
+  pthread_cond_t cond_thread;
+} thread_xor_t;
+
+typedef struct {
+  int num;
+  pthread_t* tids;
+  thread_xor_t* data;
+} threadset_t;
+
+/* XOR a with b, store result in a */
+static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
+{
+  size_t i;
+  for (i = 0; i < count; i++) {
+    a[i] ^= b[i];
+  }
+}
+
+/* The actual pthread function */
+void* reduce_xor_pthread_fn(void* arg)
+{
+  thread_xor_t* d = arg;
+  reduce_xor(d->a, d->b, d->n);
+  pthread_exit(NULL);
+}
+
+/* The actual pthread function */
+void* reduce_xor_pthread_fn2(void* arg)
+{
+  thread_xor_t* d = arg;
+  while (1) {
+    /* wait for work */
+    pthread_mutex_lock(&d->mutex);
+    while (d->done) {
+      d->thread_waiting = 1;
+      pthread_cond_wait(&d->cond_thread, &d->mutex);
+      d->thread_waiting = 0;
+    }
+    pthread_mutex_unlock(&d->mutex);
+
+    /* if signaled with 0 work, time to exit */
+    if (d->n == 0) {
+      break;
+    }
+
+    /* do work */
+    reduce_xor(d->a, d->b, d->n);
+
+    /* signal to main thread that we're done */
+    pthread_mutex_lock(&d->mutex);
+    d->done = 1;
+    if (d->main_waiting) {
+      pthread_cond_signal(&d->cond_main);
+    }
+    pthread_mutex_unlock(&d->mutex);
+  }
+  pthread_exit(NULL);
+}
+
+static int reduce_xor_pthread(unsigned char* a, unsigned char* b, size_t count)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* TODO: launch threads and attach to descriptor, activate via condition variable */
+
+  int max_threads = 16;
+  int nthreads = redset_get_nprocs();
+  if (nthreads > max_threads) {
+    nthreads = max_threads;
+  }
+  //printf("nthreads %d\n", nthreads);
+
+  thread_xor_t* data = (thread_xor_t*) REDSET_MALLOC(nthreads * sizeof(thread_xor_t));
+  pthread_t* tids    = (pthread_t*)    REDSET_MALLOC(nthreads * sizeof(pthread_t));
+
+  size_t size = count / nthreads;
+  if (size * nthreads < count) {
+    size += 1;
+  }
+  
+  /* TODO: ensure size of some minimum */
+
+  /* define work for each thread */
+  size_t offset = 0;
+  for (i = 0; i < nthreads; i++) {
+    size_t amt = count - offset;
+    if (amt > size) {
+      amt = size;
+    }
+
+    //printf("thread %d %lu\n", i, (unsigned long) amt);
+    data[i].a = a + offset;
+    data[i].b = b + offset;
+    data[i].n = amt;
+
+    offset += amt;
+  }
+
+  for (i = 0; i < nthreads; i++) {
+    if (data[i].n > 0) {
+      int rc = pthread_create(&tids[i], NULL, &reduce_xor_pthread_fn, &data[i]);
+      if (rc != 0) {
+        ret = REDSET_FAILURE;
+      }
+    }
+  }
+
+  for (i = 0; i < nthreads; i++) {
+    if (data[i].n > 0) {
+      void* retval;
+      int rc = pthread_join(tids[i], &retval);
+      if (rc != 0) {
+        ret = REDSET_FAILURE;
+      }
+    }
+  }
+
+  redset_free(&tids);
+  redset_free(&data);
+
+  return ret;
+}
+
+static int reduce_xor_pthread_setup(threadset_t* tset)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* TODO: launch threads and attach to descriptor, activate via condition variable */
+
+  int max_threads = 16;
+  int nthreads = redset_get_nprocs();
+  if (nthreads > max_threads) {
+    nthreads = max_threads;
+  }
+
+  /* allocate pthread_t and data structure for each thread */
+  pthread_t* tids    = (pthread_t*)    REDSET_MALLOC(nthreads * sizeof(pthread_t));
+  thread_xor_t* data = (thread_xor_t*) REDSET_MALLOC(nthreads * sizeof(thread_xor_t));
+
+  /* initialize mutex and condition variable for each thread */
+  int rc;
+  for (i = 0; i < nthreads; i++) {
+    data[i].rank = i;
+    data[i].done = 1;
+    data[i].main_waiting = 0;
+    data[i].thread_waiting = 0;
+    rc = pthread_mutex_init(&data[i].mutex, NULL);
+    rc = pthread_cond_init(&data[i].cond_thread, NULL);
+    rc = pthread_cond_init(&data[i].cond_main, NULL);
+  }
+
+  /* start up each thread */
+  for (i = 0; i < nthreads; i++) {
+    rc = pthread_create(&tids[i], NULL, &reduce_xor_pthread_fn2, &data[i]);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  tset->num  = nthreads;
+  tset->tids = tids;
+  tset->data = data;
+
+  return ret;
+}
+
+static int reduce_xor_pthread_execute(threadset_t* tset, unsigned char* a, unsigned char* b, size_t count)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* TODO: launch threads and attach to descriptor, activate via condition variable */
+
+  int nthreads = tset->num;
+
+  size_t size = count / nthreads;
+  if (size * nthreads < count) {
+    size += 1;
+  }
+  
+  /* TODO: ensure size of some minimum */
+
+  /* define work for each thread */
+  size_t offset = 0;
+  for (i = 0; i < nthreads; i++) {
+    size_t amt = count - offset;
+    if (amt > size) {
+      amt = size;
+    }
+
+    //printf("thread %d %lu\n", i, (unsigned long) amt);
+    tset->data[i].a = a + offset;
+    tset->data[i].b = b + offset;
+    tset->data[i].n = amt;
+
+    offset += amt;
+  }
+
+  for (i = 0; i < nthreads; i++) {
+    if (tset->data[i].n > 0) {
+      pthread_mutex_lock(&tset->data[i].mutex);
+      tset->data[i].done = 0;
+      if (tset->data[i].thread_waiting) {
+        pthread_cond_signal(&tset->data[i].cond_thread);
+      }
+      pthread_mutex_unlock(&tset->data[i].mutex);
+    }
+  }
+
+  for (i = 0; i < nthreads; i++) {
+    if (tset->data[i].n > 0) {
+      pthread_mutex_lock(&tset->data[i].mutex);
+      while (! tset->data[i].done) {
+        tset->data[i].main_waiting = 1;
+        pthread_cond_wait(&tset->data[i].cond_main, &tset->data[i].mutex);
+        tset->data[i].main_waiting = 0;
+      }
+      pthread_mutex_unlock(&tset->data[i].mutex);
+    }
+  }
+
+  return ret;
+}
+
+static int reduce_xor_pthread_teardown(threadset_t* tset)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* signal each thread with 0 work to indicate it should exit */
+  size_t offset = 0;
+  for (i = 0; i < tset->num; i++) {
+    pthread_mutex_lock(&tset->data[i].mutex);
+    tset->data[i].n = 0;
+    tset->data[i].done = 0;
+    if (tset->data[i].thread_waiting) {
+      pthread_cond_signal(&tset->data[i].cond_thread);
+    }
+    pthread_mutex_unlock(&tset->data[i].mutex);
+  }
+
+  /* wait for all threads to exit */
+  for (i = 0; i < tset->num; i++) {
+    void* retval;
+    int rc = pthread_join(tset->tids[i], &retval);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  /* free condition variables and mutexes */
+  int rc;
+  for (i = 0; i < tset->num; i++) {
+    rc = pthread_cond_destroy(&tset->data[i].cond_thread);
+    rc = pthread_cond_destroy(&tset->data[i].cond_main);
+    rc = pthread_mutex_destroy(&tset->data[i].mutex);
+  }
+
+  /* free memory in data structure */
+  redset_free(&tset->data);
+  redset_free(&tset->tids);
+
+  return ret;
+}
 
 /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
 static void redset_build_xor_filename(
@@ -312,6 +624,9 @@ int redset_apply_xor(
   kvtree_write_fd(my_chunk_file, fd_xor, header);
   kvtree_delete(&header);
 
+  threadset_t threads;
+  reduce_xor_pthread_setup(&threads);
+
   MPI_Request request[2];
   MPI_Status  status[2];
 
@@ -343,9 +658,9 @@ int redset_apply_xor(
       /* TODO: XORing with unsigned long would be faster here (if chunk size is multiple of this size) */
       /* merge the blocks via xor operation */
       if (chunk_id < d->ranks-1) {
-        for (i = 0; i < count; i++) {
-          send_buf[i] ^= recv_buf[i];
-        }
+        //reduce_xor(send_buf, recv_buf, count);
+        //reduce_xor_pthread(send_buf, recv_buf, count);
+        reduce_xor_pthread_execute(&threads, send_buf, recv_buf, count);
       }
 
       if (chunk_id > 0) {
@@ -375,6 +690,8 @@ int redset_apply_xor(
   /* free the buffers */
   redset_buffers_free(1, &send_bufs);
   redset_buffers_free(1, &recv_bufs);
+
+  reduce_xor_pthread_teardown(&threads);
 
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
@@ -505,6 +822,9 @@ int redset_recover_xor_rebuild(
     );
   }
 
+  threadset_t threads;
+  reduce_xor_pthread_setup(&threads);
+
   /* allocate buffer to read a piece of my file */
   unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
   unsigned char* send_buf = send_bufs[0];
@@ -544,11 +864,10 @@ int redset_recover_xor_rebuild(
 
         /* if not start of pipeline, receive data from left and xor with my own */
         if (root != state->lhs_rank) {
-          int i;
           MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
-          for (i = 0; i < count; i++) {
-            send_buf[i] ^= recv_buf[i];
-          }
+          //reduce_xor(send_buf, recv_buf, count);
+          //reduce_xor_pthread(send_buf, recv_buf, count);
+          reduce_xor_pthread_execute(&threads, send_buf, recv_buf, count);
         }
 
         /* send data to right-side partner */
@@ -626,6 +945,8 @@ int redset_recover_xor_rebuild(
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps,
    * we do this on every file instead of just the rebuilt files so that we preserve atime on all files */
   redset_lofi_apply_meta(current_hash);
+
+  reduce_xor_pthread_teardown(&threads);
 
   /* free the buffers */
   redset_buffers_free(1, &recv_bufs);
