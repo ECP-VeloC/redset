@@ -6,6 +6,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#ifdef HAVE_PTHREADS
+#include <pthread.h>
+#endif /* HAVE_PTHREADS */
+
 #include "mpi.h"
 
 #include "kvtree.h"
@@ -21,6 +25,229 @@
 #define REDSET_KEY_COPY_RS_DESC  "DESC"
 #define REDSET_KEY_COPY_RS_CHUNK "CHUNK"
 #define REDSET_KEY_COPY_RS_CKSUM "CKSUM"
+
+#ifdef HAVE_PTHREADS
+/* defines work for each thread along with data structures
+ * to coordinate with main thread */
+typedef struct {
+  int rank;           /* rank of thread (used for debugging) */
+  const redset_reedsolomon* state; /* records pointer to struct defining GF */;
+  unsigned char* a;   /* input/output buffer */
+  unsigned char* b;   /* other input buffers */
+  size_t n;           /* size of buffer in bytes */
+  unsigned int coeff; /* GF coefficient by which to scale buffer b */
+
+  pthread_mutex_t mutex; /* mutex for condition vars below */
+
+  int done;           /* worker sets to 1 when done */
+  int main_waiting;   /* indicates main thread is waiting on cond_main */
+  int thread_waiting; /* indicates worker thread is waiting on cond_thread */
+  pthread_cond_t cond_main;   /* condition variable to wake main thread */
+  pthread_cond_t cond_thread; /* condition variable to wake worker thread */
+} thread_rs_t;
+
+/* data structure used on main process to track each thread it launches */
+typedef struct {
+  int num;            /* number of threads */
+  pthread_t* tids;    /* pthread_t for each thread */
+  thread_rs_t* data; /* data structure for each thread */
+} threadset_t;
+
+/* The actual pthread function */
+void* reduce_rs_pthread_fn2(void* arg)
+{
+  thread_rs_t* d = arg;
+  while (1) {
+    /* wait for work */
+    pthread_mutex_lock(&d->mutex);
+    while (d->done) {
+      d->thread_waiting = 1;
+      pthread_cond_wait(&d->cond_thread, &d->mutex);
+      d->thread_waiting = 0;
+    }
+    pthread_mutex_unlock(&d->mutex);
+
+    /* if signaled with 0 work, time to exit */
+    if (d->n == 0) {
+      break;
+    }
+
+    /* do work */
+    redset_rs_reduce_buffer_multadd((redset_reedsolomon*)d->state, d->n, d->a, d->coeff, d->b);
+
+    /* signal main thread that we're done */
+    pthread_mutex_lock(&d->mutex);
+    d->done = 1;
+    if (d->main_waiting) {
+      pthread_cond_signal(&d->cond_main);
+    }
+    pthread_mutex_unlock(&d->mutex);
+  }
+  pthread_exit(NULL);
+}
+
+/* spawn a set of threads and fill in threadset structure to track them */
+static int reduce_rs_pthread_setup(threadset_t* tset)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* TODO: launch threads and attach to descriptor, activate via condition variable */
+
+  /* compute number of threads to start up */
+  int max_threads = 16;
+  int nthreads = redset_get_nprocs();
+  if (nthreads > max_threads) {
+    nthreads = max_threads;
+  }
+
+  /* allocate pthread_t and data structure for each thread */
+  pthread_t* tids   = (pthread_t*)   REDSET_MALLOC(nthreads * sizeof(pthread_t));
+  thread_rs_t* data = (thread_rs_t*) REDSET_MALLOC(nthreads * sizeof(thread_rs_t));
+
+  /* initialize mutex and condition variable for each thread */
+  int rc;
+  for (i = 0; i < nthreads; i++) {
+    data[i].rank = i;
+    data[i].done = 1;
+    data[i].main_waiting = 0;
+    data[i].thread_waiting = 0;
+    rc = pthread_mutex_init(&data[i].mutex, NULL);
+    rc = pthread_cond_init(&data[i].cond_thread, NULL);
+    rc = pthread_cond_init(&data[i].cond_main, NULL);
+  }
+
+  /* start up each thread */
+  for (i = 0; i < nthreads; i++) {
+    rc = pthread_create(&tids[i], NULL, &reduce_rs_pthread_fn2, &data[i]);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  tset->num  = nthreads;
+  tset->tids = tids;
+  tset->data = data;
+
+  return ret;
+}
+
+/* given data, assign work to threads and perform XOR reduction */
+static int reduce_rs_pthread_execute(
+  threadset_t* tset,
+  const redset_reedsolomon* state,
+  size_t count,
+  unsigned char* a,
+  unsigned int coeff,
+  unsigned char* b)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* TODO: launch threads and attach to descriptor, activate via condition variable */
+
+  int nthreads = tset->num;
+
+  /* compute number of bytes for each thread to reduce */
+  size_t size = count / nthreads;
+  if (size * nthreads < count) {
+    size += 1;
+  }
+
+  /* TODO: ensure size of some minimum */
+
+  /* define work descriptor for each thread */
+  size_t offset = 0;
+  for (i = 0; i < nthreads; i++) {
+    size_t amt = count - offset;
+    if (amt > size) {
+      amt = size;
+    }
+
+    thread_rs_t* data = &tset->data[i];
+    data->state = state;
+    data->a     = a + offset;
+    data->b     = b + offset;
+    data->n     = amt;
+    data->coeff = coeff;
+
+    offset += amt;
+  }
+
+  /* signal each worker that it has something to do */
+  for (i = 0; i < nthreads; i++) {
+    if (tset->data[i].n > 0) {
+      pthread_mutex_lock(&tset->data[i].mutex);
+      tset->data[i].done = 0;
+      if (tset->data[i].thread_waiting) {
+        pthread_cond_signal(&tset->data[i].cond_thread);
+      }
+      pthread_mutex_unlock(&tset->data[i].mutex);
+    }
+  }
+
+  /* wait for each worker to signal that it is done */
+  for (i = 0; i < nthreads; i++) {
+    if (tset->data[i].n > 0) {
+      pthread_mutex_lock(&tset->data[i].mutex);
+      while (! tset->data[i].done) {
+        tset->data[i].main_waiting = 1;
+        pthread_cond_wait(&tset->data[i].cond_main, &tset->data[i].mutex);
+        tset->data[i].main_waiting = 0;
+      }
+      pthread_mutex_unlock(&tset->data[i].mutex);
+    }
+  }
+
+  return ret;
+}
+
+/* signal threads to shutdown, wait for them to exit, and free resources in thread set */
+static int reduce_rs_pthread_teardown(threadset_t* tset)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* signal each thread with 0 work to indicate it should exit */
+  size_t offset = 0;
+  for (i = 0; i < tset->num; i++) {
+    pthread_mutex_lock(&tset->data[i].mutex);
+    tset->data[i].n = 0;
+    tset->data[i].done = 0;
+    if (tset->data[i].thread_waiting) {
+      pthread_cond_signal(&tset->data[i].cond_thread);
+    }
+    pthread_mutex_unlock(&tset->data[i].mutex);
+  }
+
+  /* wait for all threads to exit */
+  for (i = 0; i < tset->num; i++) {
+    void* retval;
+    int rc = pthread_join(tset->tids[i], &retval);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  /* free condition variables and mutexes */
+  int rc;
+  for (i = 0; i < tset->num; i++) {
+    rc = pthread_cond_destroy(&tset->data[i].cond_thread);
+    rc = pthread_cond_destroy(&tset->data[i].cond_main);
+    rc = pthread_mutex_destroy(&tset->data[i].mutex);
+  }
+
+  /* free memory in data structure */
+  redset_free(&tset->data);
+  redset_free(&tset->tids);
+  tset->num = 0;
+
+  return ret;
+}
+#endif /* HAVE_PTHREADS */
 
 /*
 =========================================
@@ -42,8 +269,7 @@ static void redset_build_rs_filename(
   );
 }
 
-/* returns true if a an RS file is found for this rank,
- * sets xor_file to full filename */
+/* returns REDSET_SUCCESS if a an RS file is found for this rank */
 static int redset_read_rs_file(
   const char* name,
   const redset_base* d,
@@ -89,7 +315,7 @@ int redset_construct_rs(MPI_Comm parent_comm, redset_base* d, int encoding)
   /* allocate a new hash to store group mapping info */
   kvtree* header = kvtree_new();
 
-  /* create a new empty hash to track group info for this xor set */
+  /* create a new empty hash to track group info for this set */
   kvtree* hash = kvtree_new();
   kvtree_set(header, REDSET_KEY_COPY_RS_GROUP, hash);
 
@@ -405,6 +631,11 @@ int redset_apply_rs(
   /* get offset into file immediately following the header */
   off_t header_size = lseek(fd_chunk, 0, SEEK_CUR);
 
+#ifdef HAVE_PTHREADS
+  threadset_t threads;
+  reduce_rs_pthread_setup(&threads);
+#endif /* HAVE_PTHREADS */
+
   /* we'll issue a send/recv for each encoding block in each step */
   MPI_Request* request = (MPI_Request*) REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Request));
   MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Status));
@@ -475,7 +706,11 @@ int redset_apply_rs(
          * coefficient and accumulate to our reductino buffer */
         int row = i + d->ranks;
         unsigned int coeff = state->mat[row * d->ranks + received_rank];
+#ifdef HAVE_PTHREADS
+        reduce_rs_pthread_execute(&threads, state, count, data_bufs[i], coeff, recv_bufs[i]);
+#else
         redset_rs_reduce_buffer_multadd(state, count, data_bufs[i], coeff, recv_bufs[i]);
+#endif /* HAVE_PTHREADS */
       }
     }
 
@@ -511,6 +746,10 @@ int redset_apply_rs(
   redset_buffers_free(state->encoding, &recv_bufs);
   redset_buffers_free(1,               &send_bufs);
 
+#ifdef HAVE_PTHREADS
+  reduce_rs_pthread_teardown(&threads);
+#endif /* HAVE_PTHREADS */
+
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
   if (scr_crc_on_copy) {
@@ -522,7 +761,7 @@ int redset_apply_rs(
   return rc;
 }
 
-/* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my xor set,
+/* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my set,
  * rebuild files and add them to the filemap */
 int redset_recover_rs_rebuild(
   const char* name,
@@ -841,7 +1080,7 @@ int redset_recover_rs_rebuild(
         memcpy(recv_bufs[0], send_bufs[0], count);
       }
 
-      /* merge received blocks via xor operation */
+      /* merge received blocks via RS operation */
       redset_rs_reduce_decode(d->ranks, state, decode_chunk_id, lhs_rank, missing, rows, count, recv_bufs[0], data_bufs);
     }
 

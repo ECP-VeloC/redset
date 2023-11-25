@@ -79,6 +79,11 @@ void** redset_buffers_alloc(int num, size_t size);
 /* free a set of buffers allocated in redset_buffers_alloc */
 void redset_buffers_free(int num, void* pbufs);
 
+#ifdef HAVE_PTHREADS
+/* Linux and OSX compatible 'get number of hardware threads' */
+unsigned int redset_get_nprocs(void);
+#endif /* HAVE_PTHREADS */
+
 #ifdef __cplusplus
 } /* extern C */
 #endif

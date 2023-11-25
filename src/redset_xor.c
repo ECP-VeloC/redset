@@ -8,13 +8,6 @@
 
 #ifdef HAVE_PTHREADS
 #include <pthread.h>
-
-/* get_nprocs() */
-#if defined(__APPLE__)
-#include <sys/sysctl.h>
-#else
-#include <sys/sysinfo.h>
-#endif
 #endif /* HAVE_PTHREADS */
 
 #include "mpi.h"
@@ -46,26 +39,6 @@ static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
 }
 
 #ifdef HAVE_PTHREADS
-/* Linux and OSX compatible 'get number of hardware threads' */
-unsigned int redset_get_nprocs(void)
-{
-  unsigned int cpu_threads;
-
-#if defined(__APPLE__)
-  int count;
-  size_t size = sizeof(count);
-  if (sysctlbyname("hw.ncpu", &count, &size, NULL, 0)) {
-      cpu_threads = 1;
-  } else {
-      cpu_threads = count;
-  }
-#else
-  cpu_threads = get_nprocs();
-#endif
-
-  return cpu_threads;
-}
-
 /* defines work for each thread along with data structures
  * to coordinate with main thread */
 typedef struct {
