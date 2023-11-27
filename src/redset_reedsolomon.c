@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #ifdef HAVE_PTHREADS
 #include <pthread.h>
 #endif /* HAVE_PTHREADS */
@@ -29,7 +31,7 @@
 #ifdef HAVE_PTHREADS
 /* defines work for each thread along with data structures
  * to coordinate with main thread */
-typedef struct {
+typedef struct thread_rs {
   int rank;           /* rank of thread (used for debugging) */
   const redset_reedsolomon* state; /* records pointer to struct defining GF */;
   unsigned char* a;   /* input/output buffer */
@@ -44,13 +46,34 @@ typedef struct {
   int thread_waiting; /* indicates worker thread is waiting on cond_thread */
   pthread_cond_t cond_main;   /* condition variable to wake main thread */
   pthread_cond_t cond_thread; /* condition variable to wake worker thread */
+
+  struct thread_rs* next; /* for linked list */
 } thread_rs_t;
+
+typedef struct {
+  pthread_mutex_t mutex; /* mutex for condition vars below */
+
+  int main_waiting;         /* indicates main thread is waiting on cond_main */
+  pthread_cond_t cond_main; /* condition variable to wake main thread */
+
+  int thread_waiting;         /* counts number of worker threads waiting on cond_thread */
+  pthread_cond_t cond_thread; /* condition variable to wake worker threads */
+
+  int work_count;         /* number of work items ever defined (not just on work list) */
+  thread_rs_t* work_head; /* list of work items, main process adds to list, workers pop */
+  thread_rs_t* work_tail;
+
+  int done_count;         /* running count of work items on done list */
+  thread_rs_t* done_head; /* workers append to done list when work is complete */
+  thread_rs_t* done_tail;
+} thread_rs_queue_t;
 
 /* data structure used on main process to track each thread it launches */
 typedef struct {
-  int num;            /* number of threads */
-  pthread_t* tids;    /* pthread_t for each thread */
+  int num;           /* number of threads */
+  pthread_t* tids;   /* pthread_t for each thread */
   thread_rs_t* data; /* data structure for each thread */
+  thread_rs_queue_t* q;
 } threadset_t;
 
 /* The actual pthread function */
@@ -82,6 +105,125 @@ void* reduce_rs_pthread_fn2(void* arg)
       pthread_cond_signal(&d->cond_main);
     }
     pthread_mutex_unlock(&d->mutex);
+  }
+  pthread_exit(NULL);
+}
+
+static thread_rs_queue_t* queue_alloc(void)
+{
+  thread_rs_queue_t* q = (thread_rs_queue_t*) REDSET_MALLOC(sizeof(thread_rs_queue_t));
+
+  pthread_mutex_init(&q->mutex, NULL);
+  pthread_cond_init(&q->cond_thread, NULL);
+  pthread_cond_init(&q->cond_main, NULL);
+
+  q->main_waiting   = 0;
+  q->thread_waiting = 0;
+
+  q->work_count = 0;
+  q->work_head = NULL;
+  q->work_tail = NULL;
+
+  q->done_count = 0;
+  q->done_head = NULL;
+  q->done_tail = NULL;
+
+  return q;
+}
+
+static void queue_free(thread_rs_queue_t** qptr)
+{
+  thread_rs_queue_t* q = *qptr;
+
+  /* delete list of completed work entries */
+  thread_rs_t* head = q->done_head;
+  while (head != NULL) {
+    thread_rs_t* next = (thread_rs_t*)head->next;
+    redset_free(&head);
+    head = next;
+  }
+
+  /* shouldn't be anything left on the qork queue, but just in case */
+  head = q->work_head;
+  while (head != NULL) {
+    thread_rs_t* next = (thread_rs_t*)head->next;
+    redset_free(&head);
+    head = next;
+  }
+
+  /* free condition variables and mutexes */
+  pthread_cond_destroy(&q->cond_thread);
+  pthread_cond_destroy(&q->cond_main);
+  pthread_mutex_destroy(&q->mutex);
+
+  /* free memory in data structure */
+  redset_free(qptr);
+}
+
+/* pop work item off list,
+ * requires we are holding the mutex */
+static thread_rs_t* work_pop(thread_rs_queue_t* q)
+{
+  //assert(q->work_head != NULL);
+
+  thread_rs_t* d = q->work_head;
+  q->work_head = (thread_rs_t*)d->next;
+  if (q->work_head == NULL) {
+    q->work_tail = NULL;
+  }
+
+  d->next = NULL;
+  return d;
+}
+
+/* append work descriptor to done queue,
+ * requires we are holding the mutex */
+static void done_append(thread_rs_queue_t* q, thread_rs_t* d)
+{
+  q->done_count += 1;
+  if (q->done_head == NULL) {
+    q->done_head = d;
+  }
+  if (q->done_tail != NULL) {
+    q->done_tail->next = (struct thread_rs*)d;
+  }
+  q->done_tail = d;
+}
+
+/* pthread worker function */
+void* reduce_rs_pthread_fn3(void* arg)
+{
+  thread_rs_queue_t* q = arg;
+  while (1) {
+    /* wait for work */
+    pthread_mutex_lock(&q->mutex);
+    while (q->work_head == NULL) {
+      q->thread_waiting += 1;
+      pthread_cond_wait(&q->cond_thread, &q->mutex);
+    }
+    thread_rs_t* d = work_pop(q);
+    pthread_mutex_unlock(&q->mutex);
+
+    /* do work */
+    if (d->n > 0) {
+      redset_rs_reduce_buffer_multadd((redset_reedsolomon*)d->state, d->n, d->a, d->coeff, d->b);
+    }
+
+    /* if we have the last work item,
+     * signal main thread that all work is done */
+    pthread_mutex_lock(&q->mutex);
+    done_append(q, d);
+    if (q->main_waiting && q->done_count == q->work_count) {
+      q->main_waiting = 0;
+      pthread_cond_signal(&q->cond_main);
+    }
+    pthread_mutex_unlock(&q->mutex);
+
+    /* if given item with 0 work,
+     * that's our signal to join */
+    if (d->n == 0) {
+      break;
+    }
   }
   pthread_exit(NULL);
 }
@@ -129,6 +271,7 @@ static int reduce_rs_pthread_setup(threadset_t* tset)
   tset->num  = nthreads;
   tset->tids = tids;
   tset->data = data;
+  tset->q    = NULL;
 
   return ret;
 }
@@ -242,6 +385,185 @@ static int reduce_rs_pthread_teardown(threadset_t* tset)
 
   /* free memory in data structure */
   redset_free(&tset->data);
+  redset_free(&tset->tids);
+  tset->num = 0;
+
+  return ret;
+}
+
+/* spawn a set of threads and fill in threadset structure to track them */
+static int reduce_rs_pthread_setup3(threadset_t* tset)
+{
+  int ret = REDSET_SUCCESS;
+
+  /* compute number of threads to start up */
+  int max_threads = 16;
+  int nthreads = redset_get_nprocs();
+  if (nthreads > max_threads) {
+    nthreads = max_threads;
+  }
+
+  /* allocate pthread_t and data structure for each thread */
+  pthread_t* tids = (pthread_t*) REDSET_MALLOC(nthreads * sizeof(pthread_t));
+
+  thread_rs_queue_t* q = queue_alloc();
+
+  /* start up each thread */
+  int i;
+  for (i = 0; i < nthreads; i++) {
+    int rc = pthread_create(&tids[i], NULL, &reduce_rs_pthread_fn3, q);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  tset->num  = nthreads;
+  tset->tids = tids;
+  tset->data = NULL;
+  tset->q    = q;
+
+  return ret;
+}
+
+static void append_work_queue(threadset_t* tset, int count, thread_rs_t* head, thread_rs_t* tail)
+{
+  thread_rs_queue_t* q = tset->q;
+
+  /* signal each worker that it has something to do */
+  pthread_mutex_lock(&q->mutex);
+
+  q->work_count += count;
+
+  /* append new entries to work queue */
+  if (q->work_head == NULL) {
+    q->work_head = head;
+  } else {
+    q->work_tail->next = (struct thread_rs*)head;
+  }
+  q->work_tail = tail;
+
+  /* signal threads to wake up and check queue */
+  if (q->thread_waiting > 0) {
+    q->thread_waiting = 0;
+    pthread_cond_broadcast(&q->cond_thread);
+  }
+  pthread_mutex_unlock(&q->mutex);
+}
+
+/* given data, assign work to threads and perform XOR reduction */
+static int reduce_rs_pthread_launch3(
+  threadset_t* tset,
+  const redset_reedsolomon* state,
+  size_t count,
+  unsigned char* a,
+  unsigned int coeff,
+  unsigned char* b)
+{
+  int ret = REDSET_SUCCESS;
+
+  int nthreads = tset->num;
+
+  /* compute number of bytes for each thread to reduce */
+  size_t size = count / nthreads;
+  if (size * nthreads < count) {
+    size += 1;
+  }
+
+  /* TODO: ensure size of some minimum */
+
+  /* define work descriptor for each thread */
+  int i;
+  thread_rs_t* head = NULL;
+  thread_rs_t* tail = NULL;
+  int work_count = 0;
+  size_t offset = 0;
+  for (i = 0; i < nthreads; i++) {
+    size_t amt = count - offset;
+    if (amt > size) {
+      amt = size;
+    }
+
+    if (amt > 0) {
+      thread_rs_t* d = (thread_rs_t*) REDSET_MALLOC(sizeof(thread_rs_t));
+      d->state = state;
+      d->a     = a + offset;
+      d->b     = b + offset;
+      d->n     = amt;
+      d->coeff = coeff;
+      d->next  = NULL;
+
+      if (head == NULL) {
+        head = d;
+      } else {
+        tail->next = (struct thread_rs*)d;
+      }
+      tail = d;
+
+      work_count += 1;
+    }
+
+    offset += amt;
+  }
+
+  append_work_queue(tset, work_count, head, tail);
+
+  return ret;
+}
+
+/* given data, assign work to threads and perform XOR reduction */
+static void reduce_rs_pthread_sync3(threadset_t* tset)
+{
+  /* wait for all work to be done */
+  thread_rs_queue_t* q = tset->q;
+  pthread_mutex_lock(&q->mutex);
+  while (q->done_count < q->work_count) {
+    q->main_waiting = 1;
+    pthread_cond_wait(&q->cond_main, &q->mutex);
+  }
+  q->done_count = 0;
+  q->work_count = 0;
+  pthread_mutex_unlock(&q->mutex);
+}
+
+/* signal threads to shutdown, wait for them to exit, and free resources in thread set */
+static int reduce_rs_pthread_teardown3(threadset_t* tset)
+{
+  int i;
+
+  int ret = REDSET_SUCCESS;
+
+  /* signal each thread with 0 work to indicate it should exit */
+  thread_rs_t* head = NULL;
+  thread_rs_t* tail = NULL;
+  int work_count = 0;
+  for (i = 0; i < tset->num; i++) {
+    thread_rs_t* d = (thread_rs_t*) REDSET_MALLOC(sizeof(thread_rs_t));
+    d->n    = 0;
+    d->next = NULL;
+
+    if (head == NULL) {
+      head = d;
+    } else {
+      tail->next = (struct thread_rs*)d;
+    }
+    tail = d;
+
+    work_count += 1;
+  }
+
+  append_work_queue(tset, work_count, head, tail);
+
+  /* wait for all threads to exit */
+  for (i = 0; i < tset->num; i++) {
+    void* retval;
+    int rc = pthread_join(tset->tids[i], &retval);
+    if (rc != 0) {
+      ret = REDSET_FAILURE;
+    }
+  }
+
+  /* free memory in data structure */
+  queue_free(&tset->q);
   redset_free(&tset->tids);
   tset->num = 0;
 
@@ -633,7 +955,8 @@ int redset_apply_rs(
 
 #ifdef HAVE_PTHREADS
   threadset_t threads;
-  reduce_rs_pthread_setup(&threads);
+  //reduce_rs_pthread_setup(&threads);
+  reduce_rs_pthread_setup3(&threads);
 #endif /* HAVE_PTHREADS */
 
   /* we'll issue a send/recv for each encoding block in each step */
@@ -707,11 +1030,17 @@ int redset_apply_rs(
         int row = i + d->ranks;
         unsigned int coeff = state->mat[row * d->ranks + received_rank];
 #ifdef HAVE_PTHREADS
-        reduce_rs_pthread_execute(&threads, state, count, data_bufs[i], coeff, recv_bufs[i]);
+        //reduce_rs_pthread_execute(&threads, state, count, data_bufs[i], coeff, recv_bufs[i]);
+        reduce_rs_pthread_launch3(&threads, state, count, data_bufs[i], coeff, recv_bufs[i]);
 #else
         redset_rs_reduce_buffer_multadd(state, count, data_bufs[i], coeff, recv_bufs[i]);
 #endif /* HAVE_PTHREADS */
       }
+
+#ifdef HAVE_PTHREADS
+      /* wait for threads to finish */
+      reduce_rs_pthread_sync3(&threads);
+#endif /* HAVE_PTHREADS */
     }
 
     /* write final encoded data to our chunk file */
@@ -747,7 +1076,8 @@ int redset_apply_rs(
   redset_buffers_free(1,               &send_bufs);
 
 #ifdef HAVE_PTHREADS
-  reduce_rs_pthread_teardown(&threads);
+  //reduce_rs_pthread_teardown(&threads);
+  reduce_rs_pthread_teardown3(&threads);
 #endif /* HAVE_PTHREADS */
 
 #if 0

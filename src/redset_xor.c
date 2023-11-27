@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #ifdef HAVE_PTHREADS
 #include <pthread.h>
 #endif /* HAVE_PTHREADS */

@@ -32,6 +32,8 @@
 /* compute crc32 */
 #include <zlib.h>
 
+#include "config.h"
+
 /* for get_nprocs() */
 #ifdef HAVE_PTHREADS
 #if defined(__APPLE__)

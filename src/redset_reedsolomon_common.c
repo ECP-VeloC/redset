@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
 #endif
@@ -780,6 +782,7 @@ void redset_rs_reduce_buffer_multadd(
 {
   int j;
 
+#ifndef HAVE_PTHREADS
   /* use our premultiplication table if it is defined and if the
    * number of elements in our Galois Field is smaller than the input arrays */
   if (state->gf_premult != NULL && state->gf_size < count) {
@@ -795,6 +798,7 @@ void redset_rs_reduce_buffer_multadd(
 
     return;
   }
+#endif /* HAVE_PTHREADS */
 
   /* otherwise, fall back to lookup each product in our log tables */
   for (j = 0; j < count; j++) {

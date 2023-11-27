@@ -9,6 +9,8 @@ extern "C" {
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
 #endif
