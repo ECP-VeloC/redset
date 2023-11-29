@@ -308,6 +308,72 @@ __global__ void multadd_gpu(unsigned int* gf_log, unsigned int* gf_exp, int gf_s
   }
 }
 
+__global__ void premultadd_gpu(unsigned int* gf_log, unsigned int* gf_exp, int gf_size, size_t count, unsigned char* dbuf, unsigned int coeff, unsigned char* rbuf)
+{
+  /* TODO: read gf_log into gf_exp thread-shared memory */
+  __shared__ unsigned char premult[256];
+
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < 256) {
+    if (coeff != 0) {
+      /* compute (v1 * v2) product as 2^( log_2(v1) + log_2(v2) ) in GF(2^bits) arithmetic */
+      if (i != 0) {
+        int sumlogs = gf_log[coeff] + gf_log[i];
+        if (sumlogs >= gf_size - 1) {
+          sumlogs -= (gf_size - 1);
+        }
+        premult[i] = (unsigned char) gf_exp[sumlogs];
+      } else {
+        premult[i] = (unsigned char) 0;
+      }
+    } else {
+      premult[i] = (unsigned char) 0;
+    }
+  }
+  __syncthreads();
+
+  //size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < count) {
+    int data = (int) rbuf[i];
+    dbuf[i] ^= premult[data];
+  }
+}
+
+__global__ void multadd2_gpu(unsigned int* gf_log, unsigned int* gf_exp, int gf_size, size_t count, unsigned char* dbuf, unsigned int coeff, unsigned char* rbuf)
+{
+  /* TODO: read gf_log into gf_exp thread-shared memory */
+  __shared__ unsigned char logs[256];
+  __shared__ unsigned char exps[256];
+  //__shared__ unsigned char exps[512];
+
+  size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i < 256) {
+    logs[i] = (unsigned char) gf_log[i];
+    exps[i] = (unsigned char) gf_exp[i];
+  }
+  //else if (i < 512) {
+  //  exps[i] = (unsigned char) gf_exp[i - 255];
+  //}
+  __syncthreads();
+
+  //size_t i = blockDim.x * blockIdx.x + threadIdx.x;
+  //if (i < count && coeff != 0) {
+  if (i < count) {
+    /* 0 times anything is 0, we treat this as a special case since
+     * there is no entry for 0 in the log table below, since there
+     * is no value of x such that 2^x = 0 */
+    int data = rbuf[i];
+    if (data != 0) {
+      /* compute (v1 * v2) product as 2^( log_2(v1) + log_2(v2) ) in GF(2^bits) arithmetic */
+      int sumlogs = logs[coeff] + logs[data];
+      if (sumlogs >= gf_size - 1) {
+        sumlogs -= (gf_size - 1);
+      }
+      dbuf[i] ^= (unsigned char) exps[sumlogs];
+    }
+  }
+}
+
 __global__ void scale_gpu(unsigned int* gf_log, unsigned int* gf_exp, int gf_size, size_t count, unsigned char* dbuf, unsigned int coeff)
 {
   /* TODO: read gf_log into gf_exp thread-shared memory */
@@ -576,6 +642,10 @@ int redset_apply_rs(
         int nthreads = 1024;
         int nblocks = (count + nthreads - 1) / nthreads;
         multadd_gpu<<<nblocks, nthreads>>>(gf_log, gf_exp, state->gf_size, count, dbuf, coeff, rbuf);
+        //if (coeff != 0) {
+        //  multadd2_gpu<<<nblocks, nthreads>>>(gf_log, gf_exp, state->gf_size, count, dbuf, coeff, rbuf);
+        //}
+        //premultadd_gpu<<<nblocks, nthreads>>>(gf_log, gf_exp, state->gf_size, count, dbuf, coeff, rbuf);
 #else
         redset_rs_reduce_buffer_multadd(state, count, data_bufs[i], coeff, recv_bufs[i]);
 #endif

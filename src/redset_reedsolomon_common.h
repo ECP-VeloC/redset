@@ -22,6 +22,12 @@ void redset_rs_gf_delete(
   redset_reedsolomon* state
 );
 
+void gf_premult_table(
+  const redset_reedsolomon* state,
+  unsigned int v1,
+  unsigned char* prods
+);
+
 /* Given our (n+k) x n encoding matrix in mat, pick M different rows
  * with M=missing from the last k checksum rows that we can use to
  * solve for the given unknown index values which will be in the range [0,n+k).

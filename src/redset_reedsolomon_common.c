@@ -177,7 +177,7 @@ static unsigned int gf_mult_table(const redset_reedsolomon* state, unsigned int 
 /* precompute the product of a constant v1 with every value v2 in our Galois Field,
  * and store the result in a lookup table at location v2,
  * given a value v2, one can then later compute v1*v2 with a lookup using v2 as the index */
-static void gf_premult_table(
+void gf_premult_table(
   const redset_reedsolomon* state,
   unsigned int v1,      /* constant value to multiply all elements by */
   unsigned char* prods) /* array of length state->gf_size to hold product of v1 with each element */

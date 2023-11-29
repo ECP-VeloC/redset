@@ -38,6 +38,7 @@ typedef struct thread_rs {
   unsigned char* b;   /* other input buffers */
   size_t n;           /* size of buffer in bytes */
   unsigned int coeff; /* GF coefficient by which to scale buffer b */
+  unsigned char premult[256]; /* space to hold premult table */
 
   pthread_mutex_t mutex; /* mutex for condition vars below */
 
@@ -206,7 +207,12 @@ void* reduce_rs_pthread_fn3(void* arg)
 
     /* do work */
     if (d->n > 0) {
-      redset_rs_reduce_buffer_multadd((redset_reedsolomon*)d->state, d->n, d->a, d->coeff, d->b);
+      size_t j;
+      gf_premult_table(d->state, d->coeff, d->premult);
+      for (j = 0; j < d->n; j++) {
+        d->a[j] ^= d->premult[d->b[j]];
+      }
+      //redset_rs_reduce_buffer_multadd((redset_reedsolomon*)d->state, d->n, d->a, d->coeff, d->b);
     }
 
     /* if we have the last work item,
@@ -397,7 +403,7 @@ static int reduce_rs_pthread_setup3(threadset_t* tset)
   int ret = REDSET_SUCCESS;
 
   /* compute number of threads to start up */
-  int max_threads = 16;
+  int max_threads = 32;
   int nthreads = redset_get_nprocs();
   if (nthreads > max_threads) {
     nthreads = max_threads;
