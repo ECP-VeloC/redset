@@ -32,23 +32,21 @@ LIST(APPEND libredset_srcs
     redset_single.c
     redset_partner.c
     redset_xor.c
+    redset_reedsolomon.c
     redset_reedsolomon_common.c
 )
 
 IF(ENABLE_PTHREADS)
     LIST(APPEND libredset_srcs
         redset_xor_pthreads.c
+        redset_reedsolomon_pthreads.c
     )
 ENDIF(ENABLE_PTHREADS)
 
 IF(ENABLE_CUDA)
     LIST(APPEND libredset_srcs
         redset_xor_gpu.cu
-        redset_reedsolomon.cu
-    )
-ELSE(ENABLE_CUDA)
-    LIST(APPEND libredset_srcs
-        redset_reedsolomon.c
+        redset_reedsolomon_gpu.cu
     )
 ENDIF(ENABLE_CUDA)
 

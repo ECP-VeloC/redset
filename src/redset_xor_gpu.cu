@@ -12,10 +12,6 @@ extern "C" {
 
 #include "mpi.h"
 
-#include "kvtree.h"
-#include "kvtree_util.h"
-#include "kvtree_mpi.h"
-
 #include "redset_io.h"
 #include "redset_util.h"
 #include "redset.h"
