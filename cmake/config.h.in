@@ -1,3 +1,4 @@
 // System Specific
 #cmakedefine HAVE_BYTESWAP_H
 #cmakedefine HAVE_PTHREADS
+#cmakedefine HAVE_CUDA
