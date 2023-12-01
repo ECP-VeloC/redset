@@ -1,5 +1,4 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 3.14)
-PROJECT(REDSET VERSION 0.3.0 LANGUAGES C CUDA)
 
 # Mac rpath Policy
 IF(POLICY CMP0042)
@@ -36,10 +35,20 @@ MESSAGE(STATUS "ENABLE_PTHREADS: ${ENABLE_PTHREADS}")
 OPTION(ENABLE_TESTS "Whether to build tests" ON)
 MESSAGE(STATUS "ENABLE_TESTS: ${ENABLE_TESTS}")
 
-# https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
 IF(ENABLE_CUDA)
-    ENABLE_LANGUAGE(CUDA)
+    # we define the project languages conditionally since listing CUDA
+    # causes the github actions build to fail since nvcc is not available
+    # and adding nvcc is complicated
+    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C CUDA)
+
+    # if nvcc can be added, then one can move the project line
+    # back to the top, always list CUDA, and selectively enable it
+    #   https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+    #ENABLE_LANGUAGE(CUDA)
+
     SET(HAVE_CUDA TRUE)
+ELSE(ENABLE_CUDA)
+    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C)
 ENDIF(ENABLE_CUDA)
 
 # Find Packages & Files
