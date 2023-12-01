@@ -552,7 +552,7 @@ int redset_apply_rs(
 
 /* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my set,
  * rebuild files and add them to the filemap */
-int redset_reedsolomon_decode_pthreads(
+int redset_reedsolomon_decode(
   const redset_base* d,
   int missing,
   int* rebuild_ranks,
@@ -979,9 +979,9 @@ int redset_recover_rs_rebuild(
   }
 
 #ifdef HAVE_CUDA
-  rc = redset_reedsolomon_decode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
+  rc = redset_reedsolomon_decode_gpu(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
 #else
-  rc = redset_reedsolomon_decode(d, rsf, chunk_file, fd_chunk, chunk_size);
+  rc = redset_reedsolomon_decode(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
 #endif /* HAVE_CUDA */
 
   /* close my chunkfile */

@@ -29,8 +29,8 @@ static __global__ void xor_gpu(unsigned char* a, unsigned char* b, int n)
 int redset_xor_encode_gpu(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
@@ -97,7 +97,7 @@ int redset_xor_encode_gpu(
         cudaMemcpy(host_buf, send_buf, count, cudaMemcpyDeviceToHost);
 
         /* write send block to send chunk file */
-        if (redset_write_attempt(my_chunk_file, fd_xor, host_buf, count) != count) {
+        if (redset_write_attempt(chunk_file, fd_chunk, host_buf, count) != count) {
           rc = REDSET_FAILURE;
         }
       }
@@ -122,12 +122,11 @@ int redset_xor_decode_gpu(
   const redset_base* d,
   int root,
   redset_lofi rsf,
-  const char* xor_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
-  MPI_Status status[2];
 
   /* get pointer to XOR state structure */
   redset_xor* state = (redset_xor*) d->state;
@@ -140,6 +139,8 @@ int redset_xor_decode_gpu(
   unsigned char* recv_buf;
   cudaMalloc(&send_buf, redset_mpi_buf_size);
   cudaMalloc(&recv_buf, redset_mpi_buf_size);
+
+  MPI_Status status[2];
 
   /* Pipelined XOR Reduce to root */
   unsigned long offset = 0;
@@ -164,7 +165,7 @@ int redset_xor_decode_gpu(
           offset += count;
         } else {
           /* for this chunk, read data from the XOR file */
-          if (redset_read_attempt(xor_file, fd_xor, host_buf, count) != count) {
+          if (redset_read_attempt(chunk_file, fd_chunk, host_buf, count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -186,6 +187,7 @@ int redset_xor_decode_gpu(
         /* send data to right-side partner */
         MPI_Send(send_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm);
       } else {
+        /* TODO: skip memcpy by receive direct to host_buf */
         /* root of rebuild, just receive incoming chunks and write them out */
         MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
 
@@ -203,7 +205,7 @@ int redset_xor_decode_gpu(
           offset += count;
         } else {
           /* for this chunk, write data from the XOR file */
-          if (redset_write_attempt(xor_file, fd_xor, host_buf, count) != count) {
+          if (redset_write_attempt(chunk_file, fd_chunk, host_buf, count) != count) {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }

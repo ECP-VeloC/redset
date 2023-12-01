@@ -215,8 +215,8 @@ int redset_encode_reddesc_xor(
 static int redset_xor_encode(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
@@ -273,7 +273,7 @@ static int redset_xor_encode(
         MPI_Waitall(2, request, status);
       } else {
         /* write send block to send chunk file */
-        if (redset_write_attempt(my_chunk_file, fd_xor, send_buf, count) != count) {
+        if (redset_write_attempt(chunk_file, fd_chunk, send_buf, count) != count) {
           rc = REDSET_FAILURE;
         }
       }
@@ -297,7 +297,6 @@ int redset_apply_xor(
   const redset_base* d)
 {
   int rc = REDSET_SUCCESS;
-  int i;
 
   /* pick out communicator */
   MPI_Comm comm = d->comm;
@@ -369,16 +368,16 @@ int redset_apply_xor(
   kvtree_util_set_bytecount(header, REDSET_KEY_COPY_XOR_CHUNK, chunk_size);
 
   /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
-  char my_chunk_file[REDSET_MAX_FILENAME];
-  redset_build_xor_filename(name, d, my_chunk_file, sizeof(my_chunk_file));
+  char chunk_file[REDSET_MAX_FILENAME];
+  redset_build_xor_filename(name, d, chunk_file, sizeof(chunk_file));
 
   /* open my chunk file */
   mode_t mode_file = redset_getmode(1, 1, 0);
-  int fd_xor = redset_open(my_chunk_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-  if (fd_xor < 0) {
+  int fd_chunk = redset_open(chunk_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
+  if (fd_chunk < 0) {
     /* TODO: try again? */
     redset_abort(-1, "Opening XOR chunk file for writing: redset_open(%s) errno=%d %s @ %s:%d",
-            my_chunk_file, errno, strerror(errno), __FILE__, __LINE__
+            chunk_file, errno, strerror(errno), __FILE__, __LINE__
     );
   }
 
@@ -389,21 +388,21 @@ int redset_apply_xor(
   redset_sort_kvtree(header);
 
   /* write out the xor chunk header */
-  kvtree_write_fd(my_chunk_file, fd_xor, header);
+  kvtree_write_fd(chunk_file, fd_chunk, header);
   kvtree_delete(&header);
 
 #ifdef HAVE_CUDA
-  rc = redset_xor_encode_gpu(d, rsf, my_chunk_file, fd_xor, chunk_size);
+  rc = redset_xor_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
 #else
 #ifdef HAVE_PTHREADS
-  rc = redset_xor_encode_pthreads(d, rsf, my_chunk_file, fd_xor, chunk_size);
+  rc = redset_xor_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
 #else
-  rc = redset_xor_encode(d, rsf, my_chunk_file, fd_xor, chunk_size);
+  rc = redset_xor_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
 #endif /* HAVE_PTHREADS */
 #endif /* HAVE_CUDA */
 
   /* close my chunkfile, with fsync */
-  if (redset_close(my_chunk_file, fd_xor) != REDSET_SUCCESS) {
+  if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -413,7 +412,7 @@ int redset_apply_xor(
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
   if (scr_crc_on_copy) {
-    scr_compute_crc(map, id, scr_my_rank_world, my_chunk_file);
+    scr_compute_crc(map, id, scr_my_rank_world, chunk_file);
     /* TODO: would be nice to save this CRC in our partner's XOR file so we can check correctness on a rebuild */
   }
 #endif
@@ -426,7 +425,7 @@ static int redset_xor_decode(
   int root,
   redset_lofi rsf,
   const char* xor_file,
-  int fd_xor,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
@@ -466,7 +465,7 @@ static int redset_xor_decode(
           offset += count;
         } else {
           /* for this chunk, read data from the XOR file */
-          if (redset_read_attempt(xor_file, fd_xor, send_buf, count) != count) {
+          if (redset_read_attempt(xor_file, fd_chunk, send_buf, count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -495,7 +494,7 @@ static int redset_xor_decode(
           offset += count;
         } else {
           /* for this chunk, write data from the XOR file */
-          if (redset_write_attempt(xor_file, fd_xor, recv_buf, count) != count) {
+          if (redset_write_attempt(xor_file, fd_chunk, recv_buf, count) != count) {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -523,7 +522,7 @@ int redset_recover_xor_rebuild(
   int rc = REDSET_SUCCESS;
 
   redset_lofi rsf;
-  int fd_xor = -1;
+  int fd_chunk = -1;
 
   /* get pointer to XOR state structure */
   redset_xor* state = (redset_xor*) d->state;
@@ -539,15 +538,15 @@ int redset_recover_xor_rebuild(
   kvtree* current_hash = NULL;
   if (root != d->rank) {
     /* open our xor file for reading */
-    fd_xor = redset_open(xor_file, O_RDONLY);
-    if (fd_xor < 0) {
+    fd_chunk = redset_open(xor_file, O_RDONLY);
+    if (fd_chunk < 0) {
       redset_abort(-1, "Opening XOR file for reading in XOR rebuild: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
         xor_file, errno, strerror(errno), __FILE__, __LINE__
       );
     }
 
     /* read in the xor chunk header */
-    kvtree_read_fd(xor_file, fd_xor, header);
+    kvtree_read_fd(xor_file, fd_chunk, header);
 
     /* lookup our file info */
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
@@ -604,8 +603,8 @@ int redset_recover_xor_rebuild(
     }
 
     /* open my xor file for writing */
-    fd_xor = redset_open(xor_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-    if (fd_xor < 0) {
+    fd_chunk = redset_open(xor_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
+    if (fd_chunk < 0) {
       /* TODO: try again? */
       redset_abort(-1, "Opening XOR chunk file for writing in XOR rebuild: redset_open(%s) errno=%d %s @ %s:%d",
         xor_file, errno, strerror(errno), __FILE__, __LINE__
@@ -619,7 +618,7 @@ int redset_recover_xor_rebuild(
     redset_sort_kvtree(header);
 
     /* write XOR chunk file header */
-    kvtree_write_fd(xor_file, fd_xor, header);
+    kvtree_write_fd(xor_file, fd_chunk, header);
   }
 
   /* read the chunk size used to compute the xor data */
@@ -631,16 +630,17 @@ int redset_recover_xor_rebuild(
   }
 
 #ifdef HAVE_CUDA
-  rc = redset_xor_decode_gpu(d, root, rsf, xor_file, fd_xor, chunk_size);
-#ifdef HAVE_PTHREADS
-  rc = redset_xor_decode_pthreads(d, root, rsf, xor_file, fd_xor, chunk_size);
+  rc = redset_xor_decode_gpu(d, root, rsf, xor_file, fd_chunk, chunk_size);
 #else
-  rc = redset_xor_decode(d, root, rsf, xor_file, fd_xor, chunk_size);
+#ifdef HAVE_PTHREADS
+  rc = redset_xor_decode_pthreads(d, root, rsf, xor_file, fd_chunk, chunk_size);
+#else
+  rc = redset_xor_decode(d, root, rsf, xor_file, fd_chunk, chunk_size);
 #endif /* HAVE_PTHREADS */
 #endif /* HAVE_CUDA */
 
   /* close my chunkfile */
-  if (redset_close(xor_file, fd_xor) != REDSET_SUCCESS) {
+  if (redset_close(xor_file, fd_chunk) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
