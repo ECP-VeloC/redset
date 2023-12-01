@@ -291,16 +291,25 @@ redset_list* redset_filelist_get_rs(
 int redset_xor_encode_pthreads(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size
 );
 
-int redset_xor_encode_pthreads(
+int redset_xor_decode_pthreads(
+  const redset_base* d,
+  int root,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_encode_pthreads(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size
 );
 #endif /* HAVE_PTHREADS */
@@ -309,16 +318,36 @@ int redset_xor_encode_pthreads(
 int redset_xor_encode_gpu(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
+  const char* chunk_file,
   int fd_xor,
   size_t chunk_size
 );
 
-int redset_xor_encode_gpu(
+int redset_xor_decode_gpu(
+  const redset_base* d,
+  int root,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_encode_gpu(
   const redset_base* d,
   redset_lofi rsf,
-  const char* my_chunk_file,
+  const char* chunk_file,
   int fd_xor,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_decode_gpu(
+  const redset_base* d,
+  int missing,
+  int* rebuild_ranks,
+  int need_rebuild,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size
 );
 #endif /* HAVE_CUDA */

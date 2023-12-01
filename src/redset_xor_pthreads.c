@@ -12,10 +12,6 @@
 
 #include "mpi.h"
 
-#include "kvtree.h"
-#include "kvtree_util.h"
-#include "kvtree_mpi.h"
-
 #include "redset_io.h"
 #include "redset_util.h"
 #include "redset.h"
@@ -318,7 +314,7 @@ int redset_xor_encode_pthreads(
   const redset_base* d,
   redset_lofi rsf,
   const char* my_chunk_file,
-  int fd_xor,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
@@ -379,7 +375,7 @@ int redset_xor_encode_pthreads(
         MPI_Waitall(2, request, status);
       } else {
         /* write send block to send chunk file */
-        if (redset_write_attempt(my_chunk_file, fd_xor, send_buf, count) != count) {
+        if (redset_write_attempt(my_chunk_file, fd_chunk, send_buf, count) != count) {
           rc = REDSET_FAILURE;
         }
       }
@@ -401,8 +397,8 @@ int redset_xor_decode_pthreads(
   const redset_base* d,
   int root,
   redset_lofi rsf,
-  const char* xor_file,
-  int fd_xor,
+  const char* chunk_file,
+  int fd_chunk,
   size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
@@ -446,7 +442,7 @@ int redset_xor_decode_pthreads(
           offset += count;
         } else {
           /* for this chunk, read data from the XOR file */
-          if (redset_read_attempt(xor_file, fd_xor, send_buf, count) != count) {
+          if (redset_read_attempt(chunk_file, fd_chunk, send_buf, count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -477,7 +473,7 @@ int redset_xor_decode_pthreads(
           offset += count;
         } else {
           /* for this chunk, write data from the XOR file */
-          if (redset_write_attempt(xor_file, fd_xor, recv_buf, count) != count) {
+          if (redset_write_attempt(chunk_file, fd_chunk, recv_buf, count) != count) {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }

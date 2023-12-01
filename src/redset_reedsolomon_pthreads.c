@@ -67,7 +67,7 @@ typedef struct {
 } threadset_t;
 
 /* The actual pthread function */
-void* reduce_rs_pthread_fn2(void* arg)
+static void* reduce_rs_pthread_fn2(void* arg)
 {
   thread_rs_t* d = arg;
   while (1) {
@@ -181,7 +181,7 @@ static void done_append(thread_rs_queue_t* q, thread_rs_t* d)
 }
 
 /* pthread worker function */
-void* reduce_rs_pthread_fn3(void* arg)
+static void* reduce_rs_pthread_fn3(void* arg)
 {
   thread_rs_queue_t* q = arg;
   while (1) {

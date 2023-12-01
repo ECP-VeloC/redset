@@ -300,7 +300,7 @@ int redset_reedsolomon_encode_gpu(
   return rc;
 }
 
-void redset_rs_reduce_decode_gpu(
+static void redset_rs_reduce_decode_gpu(
   int ranks,
   redset_reedsolomon* state,
   unsigned int* gf_log,
