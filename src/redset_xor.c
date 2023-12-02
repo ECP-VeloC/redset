@@ -6,9 +6,11 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-#include <omp.h>
-
 #include "config.h"
+
+#ifdef HAVE_OMP
+#include <omp.h>
+#endif /* HAVE_OMP */
 
 #include "mpi.h"
 
