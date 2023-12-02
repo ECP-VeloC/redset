@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <omp.h>
+
 #include "config.h"
 
 #ifdef REDSET_ENABLE_MPI
@@ -286,6 +288,7 @@ static void scale_row(
 
     /* scale all values in buffer */
     int i;
+    #pragma omp parallel for
     for (i = 0; i < count; i++) {
       buf[i] = premult[buf[i]];
     }
@@ -304,6 +307,7 @@ static void scale_row(
 
   /* scale all values in buffer */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     unsigned int val2 = (unsigned int) buf[i];
     buf[i] = (unsigned char) gf_mult_table(state, val, val2);
@@ -333,6 +337,7 @@ static void add_row(
 
   /* add values in bufa to bufb */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     bufb[i] ^= bufa[i];
   }
@@ -380,6 +385,7 @@ static void mult_add_row(
 
     /* multiply values in bufa by val and add to bufb */
     int i;
+    #pragma omp parallel for
     for (i = 0; i < count; i++) {
       bufb[i] ^= premult[bufa[i]];
     }
@@ -398,6 +404,7 @@ static void mult_add_row(
 
   /* multiply values in bufa by val and add to bufb */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     bufb[i] ^= (unsigned char) gf_mult_table(state, val, bufa[i]);
   }
@@ -767,6 +774,7 @@ static void reduce_buffer_add(
   unsigned char* data) /* items to be added to buf element wise */
 {
   int j;
+  #pragma omp parallel for
   for (j = 0; j < count; j++) {
     buf[j] ^= data[j];
   }
@@ -792,6 +800,7 @@ void redset_rs_reduce_buffer_multadd(
 
     /* now the product of coeff * and the value at val=data[j] can be
      * looked up with premult[val] */
+    #pragma omp parallel for
     for (j = 0; j < count; j++) {
       buf[j] ^= premult[data[j]];
     }
@@ -801,6 +810,7 @@ void redset_rs_reduce_buffer_multadd(
 #endif /* HAVE_PTHREADS */
 
   /* otherwise, fall back to lookup each product in our log tables */
+  #pragma omp parallel for
   for (j = 0; j < count; j++) {
     buf[j] ^= (unsigned char) gf_mult_table(state, coeff, data[j]);
   }

@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include <omp.h>
+
 #include "config.h"
 
 #include "mpi.h"
@@ -31,6 +33,7 @@ Distribute and file rebuild functions
 static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
 {
   size_t i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     a[i] ^= b[i];
   }
