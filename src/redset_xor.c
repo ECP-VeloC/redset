@@ -6,6 +6,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
+#ifdef HAVE_OMP
+#include <omp.h>
+#endif /* HAVE_OMP */
+
 #include "mpi.h"
 
 #include "kvtree.h"
@@ -24,6 +30,16 @@
 Distribute and file rebuild functions
 =========================================
 */
+
+/* XOR a with b, store result in a */
+static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
+{
+  size_t i;
+  #pragma omp parallel for
+  for (i = 0; i < count; i++) {
+    a[i] ^= b[i];
+  }
+}
 
 /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
 static void redset_build_xor_filename(
@@ -201,18 +217,14 @@ int redset_encode_reddesc_xor(
   return rc;
 }
 
-/* apply XOR redundancy scheme to dataset files */
-int redset_apply_xor(
-  int numfiles,
-  const char** files,
-  const char* name,
-  const redset_base* d)
+static int redset_xor_encode(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size)
 {
   int rc = REDSET_SUCCESS;
-  int i;
-
-  /* pick out communicator */
-  MPI_Comm comm = d->comm;
 
   /* get pointer to XOR state structure */
   redset_xor* state = (redset_xor*) d->state;
@@ -224,6 +236,78 @@ int redset_apply_xor(
   /* allocate buffer to read a piece of the recevied chunk file */
   unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
   unsigned char* recv_buf = recv_bufs[0];
+
+  MPI_Request request[2];
+  MPI_Status  status[2];
+
+  /* XOR Reduce_scatter */
+  size_t nread = 0;
+  while (nread < chunk_size) {
+    size_t count = chunk_size - nread;
+    if (count > redset_mpi_buf_size) {
+      count = redset_mpi_buf_size;
+    }
+
+    int chunk_id;
+    for(chunk_id = d->ranks-1; chunk_id >= 0; chunk_id--) {
+      /* read the next set of bytes for this chunk from my file into send_buf */
+      if (chunk_id > 0) {
+        int chunk_id_rel = (d->rank + d->ranks + chunk_id) % d->ranks;
+        if (chunk_id_rel > d->rank) {
+          chunk_id_rel--;
+        }
+        unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
+        if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+        {
+          rc = REDSET_FAILURE;
+        }
+      } else {
+        memset(send_buf, 0, count);
+      }
+
+      /* TODO: XORing with unsigned long would be faster here (if chunk size is multiple of this size) */
+      /* merge the blocks via xor operation */
+      if (chunk_id < d->ranks-1) {
+        reduce_xor(send_buf, recv_buf, count);
+      }
+
+      if (chunk_id > 0) {
+        /* not our chunk to write, forward it on and get the next */
+        MPI_Irecv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &request[0]);
+        MPI_Isend(send_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm, &request[1]);
+        MPI_Waitall(2, request, status);
+      } else {
+        /* write send block to send chunk file */
+        if (redset_write_attempt(chunk_file, fd_chunk, send_buf, count) != count) {
+          rc = REDSET_FAILURE;
+        }
+      }
+    }
+
+    nread += count;
+  }
+
+  /* free the buffers */
+  redset_buffers_free(1, &send_bufs);
+  redset_buffers_free(1, &recv_bufs);
+
+  return rc;
+}
+
+/* apply XOR redundancy scheme to dataset files */
+int redset_apply_xor(
+  int numfiles,
+  const char** files,
+  const char* name,
+  const redset_base* d)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* pick out communicator */
+  MPI_Comm comm = d->comm;
+
+  /* get pointer to XOR state structure */
+  redset_xor* state = (redset_xor*) d->state;
 
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
@@ -289,16 +373,16 @@ int redset_apply_xor(
   kvtree_util_set_bytecount(header, REDSET_KEY_COPY_XOR_CHUNK, chunk_size);
 
   /* set chunk filenames of form:  xor.<group_id>_<xor_rank+1>_of_<xor_ranks>.redset */
-  char my_chunk_file[REDSET_MAX_FILENAME];
-  redset_build_xor_filename(name, d, my_chunk_file, sizeof(my_chunk_file));
+  char chunk_file[REDSET_MAX_FILENAME];
+  redset_build_xor_filename(name, d, chunk_file, sizeof(chunk_file));
 
   /* open my chunk file */
   mode_t mode_file = redset_getmode(1, 1, 0);
-  int fd_xor = redset_open(my_chunk_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-  if (fd_xor < 0) {
+  int fd_chunk = redset_open(chunk_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
+  if (fd_chunk < 0) {
     /* TODO: try again? */
     redset_abort(-1, "Opening XOR chunk file for writing: redset_open(%s) errno=%d %s @ %s:%d",
-            my_chunk_file, errno, strerror(errno), __FILE__, __LINE__
+            chunk_file, errno, strerror(errno), __FILE__, __LINE__
     );
   }
 
@@ -309,80 +393,126 @@ int redset_apply_xor(
   redset_sort_kvtree(header);
 
   /* write out the xor chunk header */
-  kvtree_write_fd(my_chunk_file, fd_xor, header);
+  kvtree_write_fd(chunk_file, fd_chunk, header);
   kvtree_delete(&header);
 
-  MPI_Request request[2];
-  MPI_Status  status[2];
-
-  /* XOR Reduce_scatter */
-  size_t nread = 0;
-  while (nread < chunk_size) {
-    size_t count = chunk_size - nread;
-    if (count > redset_mpi_buf_size) {
-      count = redset_mpi_buf_size;
-    }
-
-    int chunk_id;
-    for(chunk_id = d->ranks-1; chunk_id >= 0; chunk_id--) {
-      /* read the next set of bytes for this chunk from my file into send_buf */
-      if (chunk_id > 0) {
-        int chunk_id_rel = (d->rank + d->ranks + chunk_id) % d->ranks;
-        if (chunk_id_rel > d->rank) {
-          chunk_id_rel--;
-        }
-        unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-        if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
-        {
-          rc = REDSET_FAILURE;
-        }
-      } else {
-        memset(send_buf, 0, count);
-      }
-
-      /* TODO: XORing with unsigned long would be faster here (if chunk size is multiple of this size) */
-      /* merge the blocks via xor operation */
-      if (chunk_id < d->ranks-1) {
-        for (i = 0; i < count; i++) {
-          send_buf[i] ^= recv_buf[i];
-        }
-      }
-
-      if (chunk_id > 0) {
-        /* not our chunk to write, forward it on and get the next */
-        MPI_Irecv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, comm, &request[0]);
-        MPI_Isend(send_buf, count, MPI_BYTE, state->rhs_rank, 0, comm, &request[1]);
-        MPI_Waitall(2, request, status);
-      } else {
-        /* write send block to send chunk file */
-        if (redset_write_attempt(my_chunk_file, fd_xor, send_buf, count) != count) {
-          rc = REDSET_FAILURE;
-        }
-      }
-    }
-
-    nread += count;
-  }
+#ifdef HAVE_CUDA
+  rc = redset_xor_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
+#else
+#ifdef HAVE_PTHREADS
+  rc = redset_xor_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
+#else
+  rc = redset_xor_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
+#endif /* HAVE_PTHREADS */
+#endif /* HAVE_CUDA */
 
   /* close my chunkfile, with fsync */
-  if (redset_close(my_chunk_file, fd_xor) != REDSET_SUCCESS) {
+  if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
   /* close my dataset files */
   redset_lofi_close(&rsf);
 
-  /* free the buffers */
-  redset_buffers_free(1, &send_bufs);
-  redset_buffers_free(1, &recv_bufs);
-
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
   if (scr_crc_on_copy) {
-    scr_compute_crc(map, id, scr_my_rank_world, my_chunk_file);
+    scr_compute_crc(map, id, scr_my_rank_world, chunk_file);
     /* TODO: would be nice to save this CRC in our partner's XOR file so we can check correctness on a rebuild */
   }
 #endif
+
+  return rc;
+}
+
+static int redset_xor_decode(
+  const redset_base* d,
+  int root,
+  redset_lofi rsf,
+  const char* xor_file,
+  int fd_chunk,
+  size_t chunk_size)
+{
+  int rc = REDSET_SUCCESS;
+
+  /* get pointer to XOR state structure */
+  redset_xor* state = (redset_xor*) d->state;
+
+  /* allocate buffer to read a piece of my file */
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* send_buf = send_bufs[0];
+
+  /* allocate buffer to read a piece of the recevied chunk file */
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* recv_buf = recv_bufs[0];
+
+  /* Pipelined XOR Reduce to root */
+  MPI_Status status[2];
+  unsigned long offset = 0;
+  int chunk_id;
+  for (chunk_id = 0; chunk_id < d->ranks; chunk_id++) {
+    size_t nread = 0;
+    while (nread < chunk_size) {
+      size_t count = chunk_size - nread;
+      if (count > redset_mpi_buf_size) {
+        count = redset_mpi_buf_size;
+      }
+
+      if (root != d->rank) {
+        /* read the next set of bytes for this chunk from my file into send_buf */
+        if (chunk_id != d->rank) {
+          /* for this chunk, read data from the logical file */
+          if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+          {
+            /* read failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+          offset += count;
+        } else {
+          /* for this chunk, read data from the XOR file */
+          if (redset_read_attempt(xor_file, fd_chunk, send_buf, count) != count) {
+            /* read failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+        }
+
+        /* if not start of pipeline, receive data from left and xor with my own */
+        if (root != state->lhs_rank) {
+          MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
+          reduce_xor(send_buf, recv_buf, count);
+        }
+
+        /* send data to right-side partner */
+        MPI_Send(send_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm);
+      } else {
+        /* root of rebuild, just receive incoming chunks and write them out */
+        MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
+
+        /* if this is not my xor chunk, write data to normal file, otherwise write to my xor chunk */
+        if (chunk_id != d->rank) {
+          /* for this chunk, write data to the logical file */
+          if (redset_lofi_pwrite(&rsf, recv_buf, count, offset) != REDSET_SUCCESS)
+          {
+            /* write failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+          offset += count;
+        } else {
+          /* for this chunk, write data from the XOR file */
+          if (redset_write_attempt(xor_file, fd_chunk, recv_buf, count) != count) {
+            /* write failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+        }
+      }
+
+      nread += count;
+    }
+  }
+
+  /* free the buffers */
+  redset_buffers_free(1, &recv_bufs);
+  redset_buffers_free(1, &send_bufs);
 
   return rc;
 }
@@ -395,10 +525,9 @@ int redset_recover_xor_rebuild(
   int root)
 {
   int rc = REDSET_SUCCESS;
-  MPI_Status status[2];
 
   redset_lofi rsf;
-  int fd_xor = -1;
+  int fd_chunk = -1;
 
   /* get pointer to XOR state structure */
   redset_xor* state = (redset_xor*) d->state;
@@ -414,15 +543,15 @@ int redset_recover_xor_rebuild(
   kvtree* current_hash = NULL;
   if (root != d->rank) {
     /* open our xor file for reading */
-    fd_xor = redset_open(xor_file, O_RDONLY);
-    if (fd_xor < 0) {
+    fd_chunk = redset_open(xor_file, O_RDONLY);
+    if (fd_chunk < 0) {
       redset_abort(-1, "Opening XOR file for reading in XOR rebuild: redset_open(%s, O_RDONLY) errno=%d %s @ %s:%d",
         xor_file, errno, strerror(errno), __FILE__, __LINE__
       );
     }
 
     /* read in the xor chunk header */
-    kvtree_read_fd(xor_file, fd_xor, header);
+    kvtree_read_fd(xor_file, fd_chunk, header);
 
     /* lookup our file info */
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
@@ -479,8 +608,8 @@ int redset_recover_xor_rebuild(
     }
 
     /* open my xor file for writing */
-    fd_xor = redset_open(xor_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
-    if (fd_xor < 0) {
+    fd_chunk = redset_open(xor_file, O_WRONLY | O_CREAT | O_TRUNC, mode_file);
+    if (fd_chunk < 0) {
       /* TODO: try again? */
       redset_abort(-1, "Opening XOR chunk file for writing in XOR rebuild: redset_open(%s) errno=%d %s @ %s:%d",
         xor_file, errno, strerror(errno), __FILE__, __LINE__
@@ -494,7 +623,7 @@ int redset_recover_xor_rebuild(
     redset_sort_kvtree(header);
 
     /* write XOR chunk file header */
-    kvtree_write_fd(xor_file, fd_xor, header);
+    kvtree_write_fd(xor_file, fd_chunk, header);
   }
 
   /* read the chunk size used to compute the xor data */
@@ -505,82 +634,18 @@ int redset_recover_xor_rebuild(
     );
   }
 
-  /* allocate buffer to read a piece of my file */
-  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
-  unsigned char* send_buf = send_bufs[0];
-
-  /* allocate buffer to read a piece of the recevied chunk file */
-  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
-  unsigned char* recv_buf = recv_bufs[0];
-
-  /* Pipelined XOR Reduce to root */
-  unsigned long offset = 0;
-  int chunk_id;
-  for (chunk_id = 0; chunk_id < d->ranks; chunk_id++) {
-    size_t nread = 0;
-    while (nread < chunk_size) {
-      size_t count = chunk_size - nread;
-      if (count > redset_mpi_buf_size) {
-        count = redset_mpi_buf_size;
-      }
-
-      if (root != d->rank) {
-        /* read the next set of bytes for this chunk from my file into send_buf */
-        if (chunk_id != d->rank) {
-          /* for this chunk, read data from the logical file */
-          if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
-          {
-            /* read failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-          offset += count;
-        } else {
-          /* for this chunk, read data from the XOR file */
-          if (redset_read_attempt(xor_file, fd_xor, send_buf, count) != count) {
-            /* read failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-        }
-
-        /* if not start of pipeline, receive data from left and xor with my own */
-        if (root != state->lhs_rank) {
-          int i;
-          MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
-          for (i = 0; i < count; i++) {
-            send_buf[i] ^= recv_buf[i];
-          }
-        }
-
-        /* send data to right-side partner */
-        MPI_Send(send_buf, count, MPI_BYTE, state->rhs_rank, 0, d->comm);
-      } else {
-        /* root of rebuild, just receive incoming chunks and write them out */
-        MPI_Recv(recv_buf, count, MPI_BYTE, state->lhs_rank, 0, d->comm, &status[0]);
-
-        /* if this is not my xor chunk, write data to normal file, otherwise write to my xor chunk */
-        if (chunk_id != d->rank) {
-          /* for this chunk, write data to the logical file */
-          if (redset_lofi_pwrite(&rsf, recv_buf, count, offset) != REDSET_SUCCESS)
-          {
-            /* write failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-          offset += count;
-        } else {
-          /* for this chunk, write data from the XOR file */
-          if (redset_write_attempt(xor_file, fd_xor, recv_buf, count) != count) {
-            /* write failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-        }
-      }
-
-      nread += count;
-    }
-  }
+#ifdef HAVE_CUDA
+  rc = redset_xor_decode_gpu(d, root, rsf, xor_file, fd_chunk, chunk_size);
+#else
+#ifdef HAVE_PTHREADS
+  rc = redset_xor_decode_pthreads(d, root, rsf, xor_file, fd_chunk, chunk_size);
+#else
+  rc = redset_xor_decode(d, root, rsf, xor_file, fd_chunk, chunk_size);
+#endif /* HAVE_PTHREADS */
+#endif /* HAVE_CUDA */
 
   /* close my chunkfile */
-  if (redset_close(xor_file, fd_xor) != REDSET_SUCCESS) {
+  if (redset_close(xor_file, fd_chunk) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
 
@@ -628,8 +693,6 @@ int redset_recover_xor_rebuild(
   redset_lofi_apply_meta(current_hash);
 
   /* free the buffers */
-  redset_buffers_free(1, &recv_bufs);
-  redset_buffers_free(1, &send_bufs);
   kvtree_delete(&header);
 
   return rc;

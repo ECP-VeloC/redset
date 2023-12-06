@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include "config.h"
+
 #include "kvtree.h"
 
 #include "redset.h"
@@ -284,6 +286,71 @@ redset_list* redset_filelist_get_rs(
   const char* name,
   redset_base* d
 );
+
+#ifdef HAVE_PTHREADS
+int redset_xor_encode_pthreads(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+
+int redset_xor_decode_pthreads(
+  const redset_base* d,
+  int root,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_encode_pthreads(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+#endif /* HAVE_PTHREADS */
+
+#ifdef HAVE_CUDA
+int redset_xor_encode_gpu(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_xor,
+  size_t chunk_size
+);
+
+int redset_xor_decode_gpu(
+  const redset_base* d,
+  int root,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_encode_gpu(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_xor,
+  size_t chunk_size
+);
+
+int redset_reedsolomon_decode_gpu(
+  const redset_base* d,
+  int missing,
+  int* rebuild_ranks,
+  int need_rebuild,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size
+);
+#endif /* HAVE_CUDA */
 
 #ifdef __cplusplus
 } /* extern C */

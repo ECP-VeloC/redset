@@ -94,6 +94,7 @@ kvtree* redset_config_set(const kvtree *config)
        elem != NULL;
        elem = kvtree_elem_next(elem))
   {
+#ifndef NDEBUG
     /* must be only one level deep, ie plain kev = value */
     const kvtree* elem_hash = kvtree_elem_hash(elem);
     assert(kvtree_size(elem_hash) == 1);
@@ -101,6 +102,7 @@ kvtree* redset_config_set(const kvtree *config)
     const kvtree* kvtree_first_elem_hash =
       kvtree_elem_hash(kvtree_elem_first(elem_hash));
     assert(kvtree_size(kvtree_first_elem_hash) == 0);
+#endif
 
     /* check against known options */
     const char** opt;

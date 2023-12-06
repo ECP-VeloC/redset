@@ -6,6 +6,12 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
+#ifdef HAVE_OMP
+#include <omp.h>
+#endif /* HAVE_OMP */
+
 #ifdef REDSET_ENABLE_MPI
 #include "mpi.h"
 #endif
@@ -175,7 +181,7 @@ static unsigned int gf_mult_table(const redset_reedsolomon* state, unsigned int 
 /* precompute the product of a constant v1 with every value v2 in our Galois Field,
  * and store the result in a lookup table at location v2,
  * given a value v2, one can then later compute v1*v2 with a lookup using v2 as the index */
-static void gf_premult_table(
+void gf_premult_table(
   const redset_reedsolomon* state,
   unsigned int v1,      /* constant value to multiply all elements by */
   unsigned char* prods) /* array of length state->gf_size to hold product of v1 with each element */
@@ -284,6 +290,7 @@ static void scale_row(
 
     /* scale all values in buffer */
     int i;
+    #pragma omp parallel for
     for (i = 0; i < count; i++) {
       buf[i] = premult[buf[i]];
     }
@@ -302,6 +309,7 @@ static void scale_row(
 
   /* scale all values in buffer */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     unsigned int val2 = (unsigned int) buf[i];
     buf[i] = (unsigned char) gf_mult_table(state, val, val2);
@@ -331,6 +339,7 @@ static void add_row(
 
   /* add values in bufa to bufb */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     bufb[i] ^= bufa[i];
   }
@@ -378,6 +387,7 @@ static void mult_add_row(
 
     /* multiply values in bufa by val and add to bufb */
     int i;
+    #pragma omp parallel for
     for (i = 0; i < count; i++) {
       bufb[i] ^= premult[bufa[i]];
     }
@@ -396,6 +406,7 @@ static void mult_add_row(
 
   /* multiply values in bufa by val and add to bufb */
   int i;
+  #pragma omp parallel for
   for (i = 0; i < count; i++) {
     bufb[i] ^= (unsigned char) gf_mult_table(state, val, bufa[i]);
   }
@@ -765,6 +776,7 @@ static void reduce_buffer_add(
   unsigned char* data) /* items to be added to buf element wise */
 {
   int j;
+  #pragma omp parallel for
   for (j = 0; j < count; j++) {
     buf[j] ^= data[j];
   }
@@ -780,6 +792,7 @@ void redset_rs_reduce_buffer_multadd(
 {
   int j;
 
+#ifndef HAVE_PTHREADS
   /* use our premultiplication table if it is defined and if the
    * number of elements in our Galois Field is smaller than the input arrays */
   if (state->gf_premult != NULL && state->gf_size < count) {
@@ -789,14 +802,17 @@ void redset_rs_reduce_buffer_multadd(
 
     /* now the product of coeff * and the value at val=data[j] can be
      * looked up with premult[val] */
+    #pragma omp parallel for
     for (j = 0; j < count; j++) {
       buf[j] ^= premult[data[j]];
     }
 
     return;
   }
+#endif /* HAVE_PTHREADS */
 
   /* otherwise, fall back to lookup each product in our log tables */
+  #pragma omp parallel for
   for (j = 0; j < count; j++) {
     buf[j] ^= (unsigned char) gf_mult_table(state, coeff, data[j]);
   }

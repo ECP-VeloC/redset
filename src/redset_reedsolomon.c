@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+#include "config.h"
+
 #include "mpi.h"
 
 #include "kvtree.h"
@@ -42,8 +44,7 @@ static void redset_build_rs_filename(
   );
 }
 
-/* returns true if a an RS file is found for this rank,
- * sets xor_file to full filename */
+/* returns REDSET_SUCCESS if a an RS file is found for this rank */
 static int redset_read_rs_file(
   const char* name,
   const redset_base* d,
@@ -89,7 +90,7 @@ int redset_construct_rs(MPI_Comm parent_comm, redset_base* d, int encoding)
   /* allocate a new hash to store group mapping info */
   kvtree* header = kvtree_new();
 
-  /* create a new empty hash to track group info for this xor set */
+  /* create a new empty hash to track group info for this set */
   kvtree* hash = kvtree_new();
   kvtree_set(header, REDSET_KEY_COPY_RS_GROUP, hash);
 
@@ -276,6 +277,130 @@ int redset_encode_reddesc_rs(
   return rc;
 }
 
+int redset_reedsolomon_encode(
+  const redset_base* d,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size)
+{
+  int i;
+
+  int rc = REDSET_SUCCESS;
+
+  /* get pointer to RS state structure */
+  redset_reedsolomon* state = (redset_reedsolomon*) d->state;
+
+  /* get offset into file immediately following the header */
+  off_t header_size = lseek(fd_chunk, 0, SEEK_CUR);
+
+  /* allocate buffers to hold reduction result, send buffer, and receive buffer */
+  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
+
+  /* allocate buffer to read a piece of my file */
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+  unsigned char* send_buf = send_bufs[0];
+
+  /* we'll issue a send/recv for each encoding block in each step */
+  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Request));
+  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Status));
+
+  /* process all data for this chunk */
+  size_t nread = 0;
+  while (nread < chunk_size) {
+    /* limit the amount of data we read from the file at a time */
+    size_t count = chunk_size - nread;
+    if (count > redset_mpi_buf_size) {
+      count = redset_mpi_buf_size;
+    }
+
+    /* initialize our reduction buffers */
+    for (i = 0; i < state->encoding; i++) {
+      memset(data_bufs[i], 0, count);
+    }
+
+    /* In each step below, we read a chunk from our data files,
+     * and send that data to the k ranks responsible for encoding
+     * the checksums.  In each step, we'll receive a sliver of
+     * data for each of the k blocks this process is responsible
+     * for encoding */
+    int chunk_step;
+    for (chunk_step = d->ranks - 1; chunk_step >= state->encoding; chunk_step--) {
+      /* get the chunk id for the current chunk */
+      int chunk_id = (d->rank + chunk_step) % d->ranks;
+
+      /* compute offset to read from within our file */
+      int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, chunk_id);
+      unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
+
+      /* read data from our file into send buffer */
+      if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
+      {
+        /* read failed, make sure we fail this rebuild */
+        rc = REDSET_FAILURE;
+      }
+
+      /* send data from our file to k ranks, and receive
+       * incoming data from k ranks */
+      int k = 0;
+      for (i = 0; i < state->encoding; i++) {
+        /* distance we're sending or receiving in this round */
+        int dist = d->ranks - chunk_step + i;
+
+        /* receive data from the right */
+        int rhs_rank = (d->rank + dist + d->ranks) % d->ranks;
+        MPI_Irecv(recv_bufs[i], count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
+        k++;
+
+        /* send our data to the left */
+        int lhs_rank = (d->rank - dist + d->ranks) % d->ranks;
+        MPI_Isend(send_buf, count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
+        k++;
+      }
+
+      /* wait for communication to complete */
+      MPI_Waitall(k, request, status);
+
+      /* encode received data into our reduction buffers */
+      for (i = 0; i < state->encoding; i++) {
+        /* compute rank that sent to us */
+        int dist = d->ranks - chunk_step + i;
+        int received_rank = (d->rank + dist + d->ranks) % d->ranks;
+
+        /* encode received data using its corresponding matrix
+         * coefficient and accumulate to our reductino buffer */
+        int row = i + d->ranks;
+        unsigned int coeff = state->mat[row * d->ranks + received_rank];
+        redset_rs_reduce_buffer_multadd(state, count, data_bufs[i], coeff, recv_bufs[i]);
+      }
+    }
+
+    /* write final encoded data to our chunk file */
+    for (i = 0; i < state->encoding; i++) {
+      off_t offset = i * chunk_size + nread + header_size;
+      if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
+        rc = REDSET_FAILURE;
+      }
+      if (redset_write_attempt(chunk_file, fd_chunk, data_bufs[i], count) != count) {
+        rc = REDSET_FAILURE;
+      }
+    }
+
+    nread += count;
+  }
+
+  redset_free(&request);
+  redset_free(&status);
+
+  /* free buffers */
+  redset_buffers_free(state->encoding, &data_bufs);
+  redset_buffers_free(state->encoding, &recv_bufs);
+  redset_buffers_free(1,               &send_bufs);
+
+  return rc;
+}
+
 /* apply ReedSolomon redundancy scheme to dataset files */
 int redset_apply_rs(
   int num_files,
@@ -300,14 +425,6 @@ int redset_apply_rs(
       d->ranks, state->encoding, __FILE__, __LINE__
     );
   }
-
-  /* allocate buffers to hold reduction result, send buffer, and receive buffer */
-  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
-  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(state->encoding, redset_mpi_buf_size);
-
-  /* allocate buffer to read a piece of my file */
-  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
-  unsigned char* send_buf = send_bufs[0];
 
   /* allocate a structure to record meta data about our files and redundancy descriptor */
   kvtree* current_hash = kvtree_new();
@@ -402,96 +519,15 @@ int redset_apply_rs(
   kvtree_write_fd(chunk_file, fd_chunk, header);
   kvtree_delete(&header);
 
-  /* get offset into file immediately following the header */
-  off_t header_size = lseek(fd_chunk, 0, SEEK_CUR);
-
-  /* we'll issue a send/recv for each encoding block in each step */
-  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Request));
-  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(state->encoding * 2 * sizeof(MPI_Status));
-
-  /* process all data for this chunk */
-  size_t nread = 0;
-  while (nread < chunk_size) {
-    /* limit the amount of data we read from the file at a time */
-    size_t count = chunk_size - nread;
-    if (count > redset_mpi_buf_size) {
-      count = redset_mpi_buf_size;
-    }
-
-    /* initialize our reduction buffers */
-    for (i = 0; i < state->encoding; i++) {
-      memset(data_bufs[i], 0, count);
-    }
-
-    /* In each step below, we read a chunk from our data files,
-     * and send that data to the k ranks responsible for encoding
-     * the checksums.  In each step, we'll receive a sliver of
-     * data for each of the k blocks this process is responsible
-     * for encoding */
-    int chunk_step;
-    for (chunk_step = d->ranks - 1; chunk_step >= state->encoding; chunk_step--) {
-      /* get the chunk id for the current chunk */
-      int chunk_id = (d->rank + chunk_step) % d->ranks;
-
-      /* compute offset to read from within our file */
-      int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, chunk_id);
-      unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-
-      /* read data from our file into send buffer */
-      if (redset_lofi_pread(&rsf, send_buf, count, offset) != REDSET_SUCCESS)
-      {
-        /* read failed, make sure we fail this rebuild */
-        rc = REDSET_FAILURE;
-      }
-
-      /* send data from our file to k ranks, and receive
-       * incoming data from k ranks */
-      int k = 0;
-      for (i = 0; i < state->encoding; i++) {
-        /* distance we're sending or receiving in this round */
-        int dist = d->ranks - chunk_step + i;
-
-        /* receive data from the right */
-        int rhs_rank = (d->rank + dist + d->ranks) % d->ranks;
-        MPI_Irecv(recv_bufs[i], count, MPI_BYTE, rhs_rank, 0, d->comm, &request[k]);
-        k++;
-
-        /* send our data to the left */
-        int lhs_rank = (d->rank - dist + d->ranks) % d->ranks;
-        MPI_Isend(send_buf, count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
-        k++;
-      }
-
-      /* wait for communication to complete */
-      MPI_Waitall(k, request, status);
-
-      /* encode received data into our reduction buffers */
-      for (i = 0; i < state->encoding; i++) {
-        /* compute rank that sent to us */
-        int dist = d->ranks - chunk_step + i;
-        int received_rank = (d->rank + dist + d->ranks) % d->ranks;
-
-        /* encode received data using its corresponding matrix
-         * coefficient and accumulate to our reductino buffer */
-        int row = i + d->ranks;
-        unsigned int coeff = state->mat[row * d->ranks + received_rank];
-        redset_rs_reduce_buffer_multadd(state, count, data_bufs[i], coeff, recv_bufs[i]);
-      }
-    }
-
-    /* write final encoded data to our chunk file */
-    for (i = 0; i < state->encoding; i++) {
-      off_t offset = i * chunk_size + nread + header_size;
-      if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
-        rc = REDSET_FAILURE;
-      }
-      if (redset_write_attempt(chunk_file, fd_chunk, data_bufs[i], count) != count) {
-        rc = REDSET_FAILURE;
-      }
-    }
-
-    nread += count;
-  }
+#ifdef HAVE_CUDA
+  rc = redset_reedsolomon_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
+#else
+#ifdef HAVE_PTHREADS
+  rc = redset_reedsolomon_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
+#else
+  rc = redset_reedsolomon_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
+#endif /* HAVE_PTHREADS */
+#endif /* HAVE_CUDA */
 
   /* close my chunkfile, with fsync */
   if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
@@ -502,14 +538,6 @@ int redset_apply_rs(
   if (redset_lofi_close(&rsf) != REDSET_SUCCESS) {
     rc = REDSET_FAILURE;
   }
-
-  redset_free(&request);
-  redset_free(&status);
-
-  /* free buffers */
-  redset_buffers_free(state->encoding, &data_bufs);
-  redset_buffers_free(state->encoding, &recv_bufs);
-  redset_buffers_free(1,               &send_bufs);
 
 #if 0
   /* if crc_on_copy is set, compute and store CRC32 value for chunk file */
@@ -522,7 +550,227 @@ int redset_apply_rs(
   return rc;
 }
 
-/* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my xor set,
+/* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my set,
+ * rebuild files and add them to the filemap */
+int redset_reedsolomon_decode(
+  const redset_base* d,
+  int missing,
+  int* rebuild_ranks,
+  int need_rebuild,
+  redset_lofi rsf,
+  const char* chunk_file,
+  int fd_chunk,
+  size_t chunk_size)
+{
+  int i;
+  int j;
+
+  int rc = REDSET_SUCCESS;
+
+  /* get pointer to RS state structure */
+  redset_reedsolomon* state = (redset_reedsolomon*) d->state;
+
+  /* get offset into file immediately following the header */
+  off_t header_size = lseek(fd_chunk, 0, SEEK_CUR);
+
+  /* allocate buffer to compute result of encoding,
+   * we need one for each missing rank */
+  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(missing, redset_mpi_buf_size);
+
+  /* allocate buffer to read a piece of my file */
+  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
+
+  /* allocate buffer to read a piece of the recevied chunk file,
+   * we might get a message from each rank */
+  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(d->ranks, redset_mpi_buf_size);
+
+  /* this array will map from missing rank number to missing data segment id,
+   * which falls in the range [0, d->ranks + state->encoding),
+   * we'll have one value for each missing rank */
+  int* unknowns = REDSET_MALLOC(missing * sizeof(int));
+
+  /* we'll have each process solve for the chunk matching its rank number */
+  int decode_chunk_id = d->rank;
+  for (i = 0; i < missing; i++) {
+    int missing_rank = rebuild_ranks[i];
+    unknowns[i] = redset_rs_get_encoding_id(d->ranks, state->encoding, missing_rank, decode_chunk_id);
+  }
+
+  /* given the ids of the unknown values,
+   * pick among the available encoding rows for the quickest solve */
+  unsigned int* m = NULL;
+  int* rows = NULL;
+  redset_rs_gaussian_solve_identify_rows(state, state->mat, d->ranks, state->encoding,
+    missing, unknowns, &m, &rows
+  );
+
+  /* make a copy of the matrix coeficients */
+  unsigned int* mcopy = (unsigned int*) REDSET_MALLOC(missing * missing * sizeof(unsigned int));
+  
+  /* during the reduce-scatter phase, each process has 1 outstanding send/recv at a time,
+   * at the end, each process sends data to each failed rank and failed ranks receive a
+   * message from all ranks, this allocation is more than needed */
+  int max_outstanding = (d->ranks + state->encoding) * 2;
+  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(max_outstanding * sizeof(MPI_Request));
+  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(max_outstanding * sizeof(MPI_Status));
+
+  /* process all data for this chunk */
+  size_t nread = 0;
+  while (nread < chunk_size) {
+    /* limit the amount of data we read from the file at a time */
+    size_t count = chunk_size - nread;
+    if (count > redset_mpi_buf_size) {
+      count = redset_mpi_buf_size;
+    }
+
+    /* initialize buffers to accumulate reduction results */
+    for (i = 0; i < missing; i++) {
+      memset(data_bufs[i], 0, count);
+    }
+
+    int step_id;
+    for (step_id = 0; step_id < d->ranks; step_id++) {
+      int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
+      int rhs_rank = (d->rank + step_id + d->ranks) % d->ranks;
+
+      /* get id of chunk we'll be sending in this step */
+      int chunk_id = (d->rank + step_id) % d->ranks;
+
+      /* get row number of encoding matrix we used for this chunk */
+      int enc_id = redset_rs_get_encoding_id(d->ranks, state->encoding, d->rank, chunk_id);
+
+      /* prepare our input buffers for the reduction */
+      if (! need_rebuild) {
+        /* we did not fail, so we can read data from our files,
+         * determine whether we read from data files or chunk file */
+        if (enc_id < d->ranks) {
+          /* compute offset to read from within our file */
+          int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, chunk_id);
+          unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
+
+          /* read data from our file */
+          if (redset_lofi_pread(&rsf, send_bufs[0], count, offset) != REDSET_SUCCESS)
+          {
+            /* read failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+        } else {
+          /* for this chunk, read data from the chunk file */
+          off_t offset = (enc_id - d->ranks) * chunk_size + nread + header_size;
+          if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
+            /* seek failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+          if (redset_read_attempt(chunk_file, fd_chunk, send_bufs[0], count) != count) {
+            /* read failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+        }
+      } else {
+        /* if we're rebuilding, initialize our send buffer with 0,
+         * so that our input does not contribute to the result */
+        memset(send_bufs[0], 0, count);
+      }
+
+      /* pipelined reduce-scatter across ranks */
+      if (step_id > 0) {
+        /* exchange data with neighboring ranks */
+        MPI_Irecv(recv_bufs[0], count, MPI_BYTE, lhs_rank, 0, d->comm, &request[0]);
+        MPI_Isend(send_bufs[0], count, MPI_BYTE, rhs_rank, 0, d->comm, &request[1]);
+        MPI_Waitall(2, request, status);
+      } else {
+        /* if we're rebuilding, initialize our send buffer with 0,
+         * so that our input does not contribute to the result */
+        memcpy(recv_bufs[0], send_bufs[0], count);
+      }
+
+      /* merge received blocks via RS operation */
+      redset_rs_reduce_decode(d->ranks, state, decode_chunk_id, lhs_rank, missing, rows, count, recv_bufs[0], data_bufs);
+    }
+
+    /* at this point, we need to invert our m matrix to solve for unknown values,
+     * we invert a copy because we need to do this operation times */
+    memcpy(mcopy, m, missing * missing * sizeof(unsigned int));
+    redset_rs_gaussian_solve(state, mcopy, missing, count, data_bufs);
+
+    /* TODO: for large groups, we may want to add some flow control here */
+
+    /* send back our results to the failed ranks, just let it all fly */
+    int k = 0;
+
+    /* if we need to rebuild, post a receive from every other rank,
+     * we stagger them based on our rank to support a natural ring */
+    if (need_rebuild) {
+      for (step_id = 0; step_id < d->ranks; step_id++) {
+        int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
+        MPI_Irecv(recv_bufs[lhs_rank], count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
+        k++;
+      }
+    }
+
+    /* send the segments we rebuilt to each failed rank */
+    for (i = 0; i < missing; i++) {
+      int missing_rank = rebuild_ranks[i];
+      MPI_Isend(data_bufs[i], count, MPI_BYTE, missing_rank, 0, d->comm, &request[k]);
+      k++;
+    }
+
+    /* wait for all comms to finish */
+    MPI_Waitall(k, request, status);
+
+    /* if we need to rebuild, we now have data we can write to our files */
+    if (need_rebuild) {
+      for (step_id = 0; step_id < d->ranks; step_id++) {
+        /* pick a rank to walk through our file */
+        int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
+
+        /* at this point, we have the final result in our data buffers,
+         * so we can write it out to the files */
+        int received_chunk_id = lhs_rank;
+        int enc_id = redset_rs_get_encoding_id(d->ranks, state->encoding, d->rank, received_chunk_id);
+        if (enc_id < d->ranks) {
+          /* for this chunk, write data to the logical file */
+          int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, received_chunk_id);
+          unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
+          if (redset_lofi_pwrite(&rsf, recv_bufs[lhs_rank], count, offset) != REDSET_SUCCESS)
+          {
+            /* write failed, make sure we fail this rebuild */
+            rc = REDSET_FAILURE;
+          }
+        } else {
+          /* write send block to chunk file */
+          off_t offset = (enc_id - d->ranks) * chunk_size + nread + header_size;
+          if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
+            rc = REDSET_FAILURE;
+          }
+          if (redset_write_attempt(chunk_file, fd_chunk, recv_bufs[lhs_rank], count) != count) {
+            rc = REDSET_FAILURE;
+          }
+        }
+      }
+    }
+
+    nread += count;
+  }
+
+  /* free off MPI requests */
+  redset_free(&request);
+  redset_free(&status);
+
+  /* free matrix coefficients and selected rows needed to decode */
+  redset_free(&mcopy);
+  redset_free(&m);
+  redset_free(&rows);
+
+  /* free buffers */
+  redset_buffers_free(missing,  &data_bufs);
+  redset_buffers_free(1,        &send_bufs);
+  redset_buffers_free(d->ranks, &recv_bufs);
+
+  return rc;
+}
+
+/* given a filemap, a redundancy descriptor, a dataset id, and a failed rank in my set,
  * rebuild files and add them to the filemap */
 int redset_recover_rs_rebuild(
   const char* name,
@@ -730,194 +978,11 @@ int redset_recover_rs_rebuild(
     );
   }
 
-  /* allocate buffer to compute result of encoding,
-   * we need one for each missing rank */
-  unsigned char** data_bufs = (unsigned char**) redset_buffers_alloc(missing, redset_mpi_buf_size);
-
-  /* allocate buffer to read a piece of my file */
-  unsigned char** send_bufs = (unsigned char**) redset_buffers_alloc(1, redset_mpi_buf_size);
-
-  /* allocate buffer to read a piece of the recevied chunk file,
-   * we might get a message from each rank */
-  unsigned char** recv_bufs = (unsigned char**) redset_buffers_alloc(d->ranks, redset_mpi_buf_size);
-
-  /* this array will map from missing rank number to missing data segment id,
-   * which falls in the range [0, d->ranks + state->encoding),
-   * we'll have one value for each missing rank */
-  int* unknowns = REDSET_MALLOC(missing * sizeof(int));
-
-  /* we'll have each process solve for the chunk matching its rank number */
-  int decode_chunk_id = d->rank;
-  for (i = 0; i < missing; i++) {
-    int missing_rank = rebuild_ranks[i];
-    unknowns[i] = redset_rs_get_encoding_id(d->ranks, state->encoding, missing_rank, decode_chunk_id);
-  }
-
-  /* given the ids of the unknown values,
-   * pick among the available encoding rows for the quickest solve */
-  unsigned int* m = NULL;
-  int* rows = NULL;
-  redset_rs_gaussian_solve_identify_rows(state, state->mat, d->ranks, state->encoding,
-    missing, unknowns, &m, &rows
-  );
-
-  /* make a copy of the matrix coeficients */
-  unsigned int* mcopy = (unsigned int*) REDSET_MALLOC(missing * missing * sizeof(unsigned int));
-  
-  /* during the reduce-scatter phase, each process has 1 outstanding send/recv at a time,
-   * at the end, each process sends data to each failed rank and failed ranks receive a
-   * message from all ranks, this allocation is more than needed */
-  int max_outstanding = (d->ranks + state->encoding) * 2;
-  MPI_Request* request = (MPI_Request*) REDSET_MALLOC(max_outstanding * sizeof(MPI_Request));
-  MPI_Status*  status  = (MPI_Status*)  REDSET_MALLOC(max_outstanding * sizeof(MPI_Status));
-
-  /* process all data for this chunk */
-  size_t nread = 0;
-  while (nread < chunk_size) {
-    /* limit the amount of data we read from the file at a time */
-    size_t count = chunk_size - nread;
-    if (count > redset_mpi_buf_size) {
-      count = redset_mpi_buf_size;
-    }
-
-    /* initialize buffers to accumulate reduction results */
-    for (i = 0; i < missing; i++) {
-      memset(data_bufs[i], 0, count);
-    }
-
-    int step_id;
-    for (step_id = 0; step_id < d->ranks; step_id++) {
-      int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
-      int rhs_rank = (d->rank + step_id + d->ranks) % d->ranks;
-
-      /* get id of chunk we'll be sending in this step */
-      int chunk_id = (d->rank + step_id) % d->ranks;
-
-      /* get row number of encoding matrix we used for this chunk */
-      int enc_id = redset_rs_get_encoding_id(d->ranks, state->encoding, d->rank, chunk_id);
-
-      /* prepare our input buffers for the reduction */
-      if (! need_rebuild) {
-        /* we did not fail, so we can read data from our files,
-         * determine whether we read from data files or chunk file */
-        if (enc_id < d->ranks) {
-          /* compute offset to read from within our file */
-          int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, chunk_id);
-          unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-
-          /* read data from our file */
-          if (redset_lofi_pread(&rsf, send_bufs[0], count, offset) != REDSET_SUCCESS)
-          {
-            /* read failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-        } else {
-          /* for this chunk, read data from the chunk file */
-          off_t offset = (enc_id - d->ranks) * chunk_size + nread + header_size;
-          if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
-            /* seek failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-          if (redset_read_attempt(chunk_file, fd_chunk, send_bufs[0], count) != count) {
-            /* read failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-        }
-      } else {
-        /* if we're rebuilding, initialize our send buffer with 0,
-         * so that our input does not contribute to the result */
-        memset(send_bufs[0], 0, count);
-      }
-
-      /* pipelined reduce-scatter across ranks */
-      if (step_id > 0) {
-        /* exchange data with neighboring ranks */
-        MPI_Irecv(recv_bufs[0], count, MPI_BYTE, lhs_rank, 0, d->comm, &request[0]);
-        MPI_Isend(send_bufs[0], count, MPI_BYTE, rhs_rank, 0, d->comm, &request[1]);
-        MPI_Waitall(2, request, status);
-      } else {
-        /* if we're rebuilding, initialize our send buffer with 0,
-         * so that our input does not contribute to the result */
-        memcpy(recv_bufs[0], send_bufs[0], count);
-      }
-
-      /* merge received blocks via xor operation */
-      redset_rs_reduce_decode(d->ranks, state, decode_chunk_id, lhs_rank, missing, rows, count, recv_bufs[0], data_bufs);
-    }
-
-    /* at this point, we need to invert our m matrix to solve for unknown values,
-     * we invert a copy because we need to do this operation times */
-    memcpy(mcopy, m, missing * missing * sizeof(unsigned int));
-    redset_rs_gaussian_solve(state, mcopy, missing, count, data_bufs);
-
-    /* TODO: for large groups, we may want to add some flow control here */
-
-    /* send back our results to the failed ranks, just let it all fly */
-    int k = 0;
-
-    /* if we need to rebuild, post a receive from every other rank,
-     * we stagger them based on our rank to support a natural ring */
-    if (need_rebuild) {
-      for (step_id = 0; step_id < d->ranks; step_id++) {
-        int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
-        MPI_Irecv(recv_bufs[lhs_rank], count, MPI_BYTE, lhs_rank, 0, d->comm, &request[k]);
-        k++;
-      }
-    }
-
-    /* send the segments we rebuilt to each failed rank */
-    for (i = 0; i < missing; i++) {
-      int missing_rank = rebuild_ranks[i];
-      MPI_Isend(data_bufs[i], count, MPI_BYTE, missing_rank, 0, d->comm, &request[k]);
-      k++;
-    }
-
-    /* wait for all comms to finish */
-    MPI_Waitall(k, request, status);
-
-    /* if we need to rebuild, we now have data we can write to our files */
-    if (need_rebuild) {
-      for (step_id = 0; step_id < d->ranks; step_id++) {
-        /* pick a rank to walk through our file */
-        int lhs_rank = (d->rank - step_id + d->ranks) % d->ranks;
-
-        /* at this point, we have the final result in our data buffers,
-         * so we can write it out to the files */
-        int received_chunk_id = lhs_rank;
-        int enc_id = redset_rs_get_encoding_id(d->ranks, state->encoding, d->rank, received_chunk_id);
-        if (enc_id < d->ranks) {
-          /* for this chunk, write data to the logical file */
-          int chunk_id_rel = redset_rs_get_data_id(d->ranks, state->encoding, d->rank, received_chunk_id);
-          unsigned long offset = chunk_size * (unsigned long) chunk_id_rel + nread;
-          if (redset_lofi_pwrite(&rsf, recv_bufs[lhs_rank], count, offset) != REDSET_SUCCESS)
-          {
-            /* write failed, make sure we fail this rebuild */
-            rc = REDSET_FAILURE;
-          }
-        } else {
-          /* write send block to chunk file */
-          off_t offset = (enc_id - d->ranks) * chunk_size + nread + header_size;
-          if (redset_lseek(chunk_file, fd_chunk, offset, SEEK_SET) != REDSET_SUCCESS) {
-            rc = REDSET_FAILURE;
-          }
-          if (redset_write_attempt(chunk_file, fd_chunk, recv_bufs[lhs_rank], count) != count) {
-            rc = REDSET_FAILURE;
-          }
-        }
-      }
-    }
-
-    nread += count;
-  }
-
-  /* free off MPI requests */
-  redset_free(&request);
-  redset_free(&status);
-
-  /* free matrix coefficients and selected rows needed to decode */
-  redset_free(&mcopy);
-  redset_free(&m);
-  redset_free(&rows);
+#ifdef HAVE_CUDA
+  rc = redset_reedsolomon_decode_gpu(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
+#else
+  rc = redset_reedsolomon_decode(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
+#endif /* HAVE_CUDA */
 
   /* close my chunkfile */
   if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
@@ -966,11 +1031,6 @@ int redset_recover_rs_rebuild(
   /* reapply metadata properties to file: uid, gid, mode bits, timestamps,
    * we do this on every file instead of just the rebuilt files so that we preserve atime on all files */
   redset_lofi_apply_meta(current_hash);
-
-  /* free buffers */
-  redset_buffers_free(missing,  &data_bufs);
-  redset_buffers_free(1,        &send_bufs);
-  redset_buffers_free(d->ranks, &recv_bufs);
 
   /* free the buffers */
   kvtree_delete(&header);

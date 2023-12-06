@@ -32,6 +32,17 @@
 /* compute crc32 */
 #include <zlib.h>
 
+#include "config.h"
+
+/* for get_nprocs() */
+#ifdef HAVE_PTHREADS
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#else
+#include <sys/sysinfo.h>
+#endif
+#endif /* HAVE_PTHREADS */
+
 #include "kvtree.h"
 #include "kvtree_util.h"
 
@@ -437,3 +448,25 @@ const char* redset_filelist_file(redset_filelist listvp, int index)
 
   return list->files[index];
 }
+
+#ifdef HAVE_PTHREADS
+/* Linux and OSX compatible 'get number of hardware threads' */
+unsigned int redset_get_nprocs(void)
+{ 
+  unsigned int cpu_threads;
+
+#if defined(__APPLE__)
+  int count;
+  size_t size = sizeof(count);
+  if (sysctlbyname("hw.ncpu", &count, &size, NULL, 0)) {
+      cpu_threads = 1;
+  } else {
+      cpu_threads = count;
+  }
+#else
+  cpu_threads = get_nprocs();
+#endif
+  
+  return cpu_threads;
+}
+#endif /* HAVE_PTHREADS */

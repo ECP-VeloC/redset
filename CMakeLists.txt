@@ -26,6 +26,12 @@ else()
 endif()
 MESSAGE(STATUS "REDSET_LINK_STATIC: ${REDSET_LINK_STATIC}")
 
+OPTION(ENABLE_OPENMP "Whether to enable OpenMP support" OFF)
+MESSAGE(STATUS "ENABLE_OPENMP: ${ENABLE_OPENMP}")
+
+OPTION(ENABLE_PTHREADS "Whether to enable pthreads support" OFF)
+MESSAGE(STATUS "ENABLE_PTHREADS: ${ENABLE_PTHREADS}")
+
 OPTION(ENABLE_CUDA "Whether to enable CUDA support" OFF)
 MESSAGE(STATUS "ENABLE_CUDA: ${ENABLE_CUDA}")
 
@@ -33,7 +39,17 @@ OPTION(ENABLE_TESTS "Whether to build tests" ON)
 MESSAGE(STATUS "ENABLE_TESTS: ${ENABLE_TESTS}")
 
 IF(ENABLE_CUDA)
+    # we define the project languages conditionally since listing CUDA
+    # causes the github actions build to fail since nvcc is not available
+    # and adding nvcc is complicated
     PROJECT(REDSET VERSION 0.3.0 LANGUAGES C CUDA)
+
+    # if nvcc can be added, then one can move the project line
+    # back to the top, always list CUDA, and selectively enable it
+    #   https://cliutils.gitlab.io/modern-cmake/chapters/packages/CUDA.html
+    #ENABLE_LANGUAGE(CUDA)
+
+    SET(HAVE_CUDA TRUE)
 ELSE(ENABLE_CUDA)
     PROJECT(REDSET VERSION 0.3.0 LANGUAGES C)
 ENDIF(ENABLE_CUDA)
@@ -83,6 +99,25 @@ LIST(APPEND REDSET_EXTERNAL_LIBS ZLIB::ZLIB)
 LIST(APPEND REDSET_EXTERNAL_STATIC_LIBS ZLIB::ZLIB)
 LIST(APPEND REDSET_SERIAL_LIBS ZLIB::ZLIB)
 LIST(APPEND REDSET_SERIAL_STATIC_LIBS ZLIB::ZLIB)
+
+IF(ENABLE_OPENMP)
+    FIND_PACKAGE(OpenMP)
+    IF(OpenMP_FOUND)
+        SET(HAVE_OMP TRUE)
+        LIST(APPEND REDSET_EXTERNAL_LIBS OpenMP::OpenMP_C)
+        LIST(APPEND REDSET_EXTERNAL_STATIC_LIBS OpenMP::OpenMP_C)
+    ENDIF(OpenMP_FOUND)
+ENDIF(ENABLE_OPENMP)
+
+# PTHREADS
+IF(ENABLE_PTHREADS)
+  FIND_PACKAGE(Threads REQUIRED)
+  IF(CMAKE_USE_PTHREADS_INIT)
+      SET(HAVE_PTHREADS TRUE)
+      LIST(APPEND REDSET_EXTERNAL_LIBS Threads::Threads)
+      LIST(APPEND REDSET_EXTERNAL_STATIC_LIBS Threads::Threads)
+  ENDIF()
+ENDIF(ENABLE_PTHREADS)
 
 ## HEADERS
 INCLUDE(CheckIncludeFile)
