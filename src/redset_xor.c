@@ -45,7 +45,7 @@ static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
 static void redset_build_xor_filename(
   const char* name,
   const redset_base* d,
-  char* file, 
+  char* file,
   size_t len)
 {
   int rank_world;
@@ -209,7 +209,7 @@ int redset_encode_reddesc_xor(
   /* exchange our redundancy descriptor hash with our partners */
   kvtree* partner_hash = kvtree_new();
   kvtree_sendrecv(hash, state->rhs_rank, partner_hash, state->lhs_rank, d->comm);
-   
+
   /* store partner hash in our under its name */
   kvtree_merge(hash, partner_hash);
   kvtree_delete(&partner_hash);
@@ -885,6 +885,25 @@ redset_filelist redset_filelist_get_data(
   }
 
   redset_free(&current_hashes);
+
+  return list;
+}
+
+/* returns a list of original files encoded by redundancy descriptor */
+redset_list* redset_filelist_orig_get_xor(
+  const char* name,
+  const redset_base* d)
+{
+  redset_list* list = NULL;
+
+  /* check whether we have our files and our partner's files */
+  kvtree* header = kvtree_new();
+  if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
+    /* get pointer to hash for this rank */
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+    list = redset_lofi_filelist(current_hash);
+  }
+  kvtree_delete(&header);
 
   return list;
 }

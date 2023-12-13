@@ -1304,3 +1304,33 @@ redset_filelist redset_filelist_get(
 
   return list;
 }
+
+/* returns a list of original files encoded by redundancy descriptor */
+redset_filelist redset_filelist_orig_get(
+  const char* name,
+  const redset dvp)
+{
+  /* get pointer to redset structure */
+  redset_base* d = (redset_base*) dvp;
+
+  /* create a temporary file list to record files from redundancy scheme */
+  redset_list* tmp = NULL;
+
+  /* get files added by redundancy method */
+  switch (d->type) {
+  case REDSET_COPY_SINGLE:
+    tmp = redset_filelist_orig_get_single(name, d);
+    break;
+  case REDSET_COPY_PARTNER:
+    tmp = redset_filelist_orig_get_partner(name, d);
+    break;
+  case REDSET_COPY_XOR:
+    tmp = redset_filelist_orig_get_xor(name, d);
+    break;
+  case REDSET_COPY_RS:
+    tmp = redset_filelist_orig_get_rs(name, d);
+    break;
+  }
+
+  return tmp;
+}

@@ -287,6 +287,26 @@ redset_list* redset_filelist_get_rs(
   redset_base* d
 );
 
+redset_list* redset_filelist_orig_get_single(
+  const char* name,
+  const redset_base* d
+);
+
+redset_list* redset_filelist_orig_get_partner(
+  const char* name,
+  const redset_base* d
+);
+
+redset_list* redset_filelist_orig_get_xor(
+  const char* name,
+  const redset_base* d
+);
+
+redset_list* redset_filelist_orig_get_rs(
+  const char* name,
+  const redset_base* d
+);
+
 #ifdef HAVE_PTHREADS
 int redset_xor_encode_pthreads(
   const redset_base* d,

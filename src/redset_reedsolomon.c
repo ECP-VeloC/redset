@@ -34,7 +34,7 @@ Distribute and file rebuild functions
 static void redset_build_rs_filename(
   const char* name,
   const redset_base* d,
-  char* file, 
+  char* file,
   size_t len)
 {
   int rank_world;
@@ -265,7 +265,7 @@ int redset_encode_reddesc_rs(
      * receive incoming hash from left neighbors */
     kvtree* partner_hash = kvtree_new();
     kvtree_sendrecv(send_hash, rhs_rank, partner_hash, lhs_rank, d->comm);
-     
+
     /* store partner hash in our under its name */
     kvtree_merge(hash, partner_hash);
     kvtree_delete(&partner_hash);
@@ -606,7 +606,7 @@ int redset_reedsolomon_decode(
 
   /* make a copy of the matrix coeficients */
   unsigned int* mcopy = (unsigned int*) REDSET_MALLOC(missing * missing * sizeof(unsigned int));
-  
+
   /* during the reduce-scatter phase, each process has 1 outstanding send/recv at a time,
    * at the end, each process sends data to each failed rank and failed ranks receive a
    * message from all ranks, this allocation is more than needed */
@@ -1139,6 +1139,25 @@ redset_list* redset_filelist_get_rs(
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);
+
+  return list;
+}
+
+/* returns a list of original files encoded by redundancy descriptor */
+redset_list* redset_filelist_orig_get_rs(
+  const char* name,
+  const redset_base* d)
+{
+  redset_list* list = NULL;
+
+  /* check whether we have our files and our partner's files */
+  kvtree* header = kvtree_new();
+  if (redset_read_rs_file(name, d, header) == REDSET_SUCCESS) {
+    /* get pointer to hash for this rank */
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
+    list = redset_lofi_filelist(current_hash);
+  }
+  kvtree_delete(&header);
 
   return list;
 }
