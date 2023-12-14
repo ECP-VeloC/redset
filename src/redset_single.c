@@ -170,7 +170,7 @@ int redset_unapply_single(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_list* redset_filelist_get_single(
+redset_list* redset_filelist_enc_get_single(
   const char* name,
   redset_base* d)
 {

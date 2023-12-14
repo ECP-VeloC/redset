@@ -253,7 +253,7 @@ int check_for_redundancy_files(int mode, const char* path, redset d)
   int rc = 0;
 
   /* get list of redundancy files */
-  redset_filelist list = redset_filelist_get(path, d);
+  redset_filelist list = redset_filelist_enc_get(path, d);
   if (list == NULL) {
     ABORT("Failed to get list of redundancy files");
   }
@@ -288,7 +288,7 @@ int delete_redundancy_files(int mode, const char* path, redset d)
   int rc = 0;
 
   /* get list of redundancy files */
-  redset_filelist list = redset_filelist_get(path, d);
+  redset_filelist list = redset_filelist_enc_get(path, d);
   if (list == NULL) {
     ABORT("Failed to get list of redundancy files");
   }
@@ -358,7 +358,7 @@ int test_unapply(int mode, const char* path, redset d, MPI_Comm comm)
   }
 
   /* get list of redundancy files */
-  redset_filelist list = redset_filelist_get(path, d);
+  redset_filelist list = redset_filelist_enc_get(path, d);
   if (list == NULL) {
     ABORT("Failed to get list of redundancy files");
   }

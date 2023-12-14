@@ -1128,7 +1128,7 @@ int redset_unapply_rs(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_list* redset_filelist_get_rs(
+redset_list* redset_filelist_enc_get_rs(
   const char* name,
   redset_base* d)
 {

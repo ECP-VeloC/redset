@@ -156,7 +156,7 @@ int redset_unapply(
 );
 
 /** return list of files added by redundancy scheme */
-redset_filelist redset_filelist_get(
+redset_filelist redset_filelist_enc_get(
   const char* name, /**< [IN] - path/filename prefix to prepend to redset metadata files */
   const redset d    /**< [IN] - redundancy descriptor associated with above path */
 );
@@ -167,7 +167,7 @@ redset_filelist redset_filelist_orig_get(
   const redset d    /**< [IN] - redundancy descriptor associated with above path */
 );
 
-/** free file list allocated by call to redset_filelist_get */
+/** free file list allocated by call to redset_filelist_*_get */
 int redset_filelist_release(
   redset_filelist* plist /**< [INOUT] - address of pointer to list to be freed, sets pointer to NULL */
 );

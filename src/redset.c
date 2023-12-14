@@ -1240,7 +1240,7 @@ static int redset_from_dir(
 #endif
 
 /* returns a list of files added by redundancy descriptor */
-redset_filelist redset_filelist_get(
+redset_filelist redset_filelist_enc_get(
   const char* name,
   const redset dvp)
 {
@@ -1257,16 +1257,16 @@ redset_filelist redset_filelist_get(
   /* get files added by redundancy method */
   switch (d->type) {
   case REDSET_COPY_SINGLE:
-    tmp = redset_filelist_get_single(name, d);
+    tmp = redset_filelist_enc_get_single(name, d);
     break;
   case REDSET_COPY_PARTNER:
-    tmp = redset_filelist_get_partner(name, d);
+    tmp = redset_filelist_enc_get_partner(name, d);
     break;
   case REDSET_COPY_XOR:
-    tmp = redset_filelist_get_xor(name, d);
+    tmp = redset_filelist_enc_get_xor(name, d);
     break;
   case REDSET_COPY_RS:
-    tmp = redset_filelist_get_rs(name, d);
+    tmp = redset_filelist_enc_get_rs(name, d);
     break;
   }
 

@@ -1034,7 +1034,7 @@ int redset_unapply_partner(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_list* redset_filelist_get_partner(
+redset_list* redset_filelist_enc_get_partner(
   const char* name,
   redset_base* d)
 {

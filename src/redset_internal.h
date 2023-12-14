@@ -267,22 +267,22 @@ int redset_unapply_rs(
 );
 
 
-redset_list* redset_filelist_get_single(
+redset_list* redset_filelist_enc_get_single(
   const char* name,
   redset_base* d
 );
 
-redset_list* redset_filelist_get_partner(
+redset_list* redset_filelist_enc_get_partner(
   const char* name,
   redset_base* d
 );
 
-redset_list* redset_filelist_get_xor(
+redset_list* redset_filelist_enc_get_xor(
   const char* name,
   redset_base* d
 );
 
-redset_list* redset_filelist_get_rs(
+redset_list* redset_filelist_enc_get_rs(
   const char* name,
   redset_base* d
 );
