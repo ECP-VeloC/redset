@@ -45,7 +45,7 @@ static void reduce_xor(unsigned char* a, const unsigned char* b, size_t count)
 static void redset_build_xor_filename(
   const char* name,
   const redset_base* d,
-  char* file, 
+  char* file,
   size_t len)
 {
   int rank_world;
@@ -209,7 +209,7 @@ int redset_encode_reddesc_xor(
   /* exchange our redundancy descriptor hash with our partners */
   kvtree* partner_hash = kvtree_new();
   kvtree_sendrecv(hash, state->rhs_rank, partner_hash, state->lhs_rank, d->comm);
-   
+
   /* store partner hash in our under its name */
   kvtree_merge(hash, partner_hash);
   kvtree_delete(&partner_hash);
@@ -768,7 +768,7 @@ int redset_unapply_xor(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_list* redset_filelist_get_xor(
+redset_list* redset_filelist_enc_get_xor(
   const char* name,
   redset_base* d)
 {
@@ -781,110 +781,21 @@ redset_list* redset_filelist_get_xor(
   return list;
 }
 
-redset_filelist redset_filelist_get_data(
-  int num,
-  const char** files)
+/* returns a list of original files encoded by redundancy descriptor */
+redset_list* redset_filelist_orig_get_xor(
+  const char* name,
+  const redset_base* d)
 {
-  int total_ranks = 0;
-  int total_files = 0;
-  kvtree** current_hashes = NULL;
+  redset_list* list = NULL;
 
-  int i;
-  for (i = 0; i < num; i++) {
-    /* open the current file */
-    const char* file = files[i];
-    int fd = redset_open(file, O_RDONLY);
-    if (fd < 0) {
-      redset_err("Opening XOR file for reading: redset_open(%s) errno=%d %s @ %s:%d",
-        file, errno, strerror(errno), __FILE__, __LINE__
-      );
-      return NULL;
-    }
-
-    /* read header from the file */
-    kvtree* header = kvtree_new();
-    kvtree_read_fd(file, fd, header);
-
-    /* if this is our first file, get number of ranks in the redudancy group */
-    if (current_hashes == NULL) {
-      /* read number of items in the redudancy group */
-      kvtree* group_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_GROUP);
-      kvtree_util_get_int(group_hash, REDSET_KEY_COPY_XOR_GROUP_RANKS, &total_ranks);
-
-      /* allocate a spot to hold the file info for each member */
-      current_hashes = (kvtree**) REDSET_MALLOC(total_ranks * sizeof(kvtree*));
-
-      /* initialize all spots to NULL so we know whether we've already read it in */
-      int j;
-      for (j = 0; j < total_ranks; j++) {
-        current_hashes[j] = NULL;
-      }
-    }
-
-    /* get file info for each rank we can pull from this header */
-    kvtree* desc_hash = kvtree_get(header, REDSET_KEY_COPY_XOR_DESC);
-    kvtree_elem* rank_elem;
-    for (rank_elem = kvtree_elem_first(desc_hash);
-         rank_elem != NULL;
-         rank_elem = kvtree_elem_next(rank_elem))
-    {
-      /* get the rank of the file info */
-      int rank = kvtree_elem_key_int(rank_elem);
-
-      /* copy to our array if it's not already set */
-      if (current_hashes[rank] == NULL) {
-        /* not set, get pointer to file info */
-        kvtree* rank_hash = kvtree_elem_hash(rank_elem);
-
-        /* allocate an empty kvtree and copy the file info */
-        current_hashes[rank] = kvtree_new();
-        kvtree_merge(current_hashes[rank], rank_hash);
-
-        /* get number of files for this rank */
-        int numfiles = 0;
-        kvtree_util_get_int(rank_hash, "FILES", &numfiles);
-
-        /* sum the files to our running total across all ranks */
-        total_files += numfiles;
-      }
-    }
-
-    kvtree_delete(&header);
-
-    redset_close(file, fd);
+  /* check whether we have our files and our partner's files */
+  kvtree* header = kvtree_new();
+  if (redset_read_xor_file(name, d, header) == REDSET_SUCCESS) {
+    /* get pointer to hash for this rank */
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_XOR_DESC, d->rank);
+    list = redset_lofi_filelist(current_hash);
   }
-
-  /* allocate a list to hold files for all ranks */
-  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
-
-  list->count = total_files;
-  list->files = (const char**) REDSET_MALLOC(total_files * sizeof(char*));
-
-  int idx = 0;
-  for (i = 0; i < total_ranks; i++) {
-    if (current_hashes[i] == NULL) {
-      /* ERROR! */
-    }
-
-    /* get number of files for this rank */
-    int numfiles = 0;
-    kvtree_util_get_int(current_hashes[i], "FILES", &numfiles);
-
-    int j;
-    kvtree* files_hash = kvtree_get(current_hashes[i], "FILE");
-    for (j = 0; j < numfiles; j++) {
-      /* get file name of this file */
-      kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
-      kvtree_elem* elem = kvtree_elem_first(index_hash);
-      const char* filename = kvtree_elem_key(elem);
-      list->files[idx] = strdup(filename);
-      idx++;
-    }
-
-    kvtree_delete(&current_hashes[i]);
-  }
-
-  redset_free(&current_hashes);
+  kvtree_delete(&header);
 
   return list;
 }

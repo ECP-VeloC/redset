@@ -52,6 +52,9 @@ int redset_lofi_apply_meta_mapped(kvtree* hash, const kvtree* map);
 /* given a hash that defines a set of files, apply metadata recorded to each file */
 int redset_lofi_apply_meta(kvtree* hash);
 
+/* given a hash that defines a set of files, return list of files */
+redset_filelist redset_lofi_filelist(const kvtree* hash);
+
 #ifdef __cplusplus
 } /* extern C */
 #endif

@@ -37,7 +37,7 @@
 static void redset_build_single_filename(
   const char* name,
   const redset_base* d,
-  char* file, 
+  char* file,
   size_t len)
 {
   int rank_world;
@@ -170,7 +170,7 @@ int redset_unapply_single(
 }
 
 /* returns a list of files added by redundancy descriptor */
-redset_list* redset_filelist_get_single(
+redset_list* redset_filelist_enc_get_single(
   const char* name,
   redset_base* d)
 {
@@ -180,5 +180,24 @@ redset_list* redset_filelist_get_single(
   list->count = 1;
   list->files = (const char**) REDSET_MALLOC(sizeof(char*));
   list->files[0] = strdup(file);
+  return list;
+}
+
+/* returns a list of original files encoded by redundancy descriptor */
+redset_list* redset_filelist_orig_get_single(
+  const char* name,
+  const redset_base* d)
+{
+  redset_list* list = NULL;
+
+  /* check whether we have our files and our partner's files */
+  kvtree* header = kvtree_new();
+  if (redset_read_single_file(name, d, header) == REDSET_SUCCESS) {
+    /* get pointer to hash for this rank */
+    kvtree* current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_SINGLE_DESC, d->rank);
+    list = redset_lofi_filelist(current_hash);
+  }
+  kvtree_delete(&header);
+
   return list;
 }

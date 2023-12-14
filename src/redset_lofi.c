@@ -243,7 +243,7 @@ int redset_lofi_check_mapped(const kvtree* hash, const kvtree* map)
     kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
     kvtree_elem* elem = kvtree_elem_first(index_hash);
     const char* file = kvtree_elem_key(elem);
-  
+
     /* lookup hash for this file */
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file);
     if (file_hash == NULL) {
@@ -251,7 +251,7 @@ int redset_lofi_check_mapped(const kvtree* hash, const kvtree* map)
       have_my_files = 0;
       continue;
     }
-  
+
     /* get name of file we're opening */
     char* file_name_mapped = (char*) file;
     if (map != NULL) {
@@ -269,10 +269,10 @@ int redset_lofi_check_mapped(const kvtree* hash, const kvtree* map)
       have_my_files = 0;
       continue;
     }
-  
+
     /* get file size of this file */
     unsigned long file_size = redset_file_size(file_name_mapped);
-  
+
     /* lookup expected file size and compare to actual size */
     unsigned long file_size_saved;
     if (kvtree_util_get_bytecount(file_hash, "SIZE", &file_size_saved) == KVTREE_SUCCESS) {
@@ -343,7 +343,7 @@ int redset_lofi_open_mapped(const kvtree* hash, const kvtree* map, int flags, mo
     kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
     kvtree_elem* elem = kvtree_elem_first(index_hash);
     const char* file_name = kvtree_elem_key(elem);
-  
+
     /* lookup hash for this file */
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
@@ -399,7 +399,7 @@ int redset_lofi_open_mapped(const kvtree* hash, const kvtree* map, int flags, mo
   rsf->bytes     = bytes;
   rsf->fds       = fds;
   rsf->filenames = filenames;
-  rsf->filesizes = filesizes;  
+  rsf->filesizes = filesizes;
 
   return rc;
 }
@@ -509,7 +509,7 @@ int redset_lofi_apply_meta_mapped(kvtree* hash, const kvtree* map)
     kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
     kvtree_elem* elem = kvtree_elem_first(index_hash);
     const char* file_name = kvtree_elem_key(elem);
-  
+
     /* lookup hash for this file */
     kvtree* file_hash = kvtree_getf(files_hash, "%d %s", i, file_name);
 
@@ -536,4 +536,43 @@ int redset_lofi_apply_meta(kvtree* hash)
 {
   int rc = redset_lofi_apply_meta_mapped(hash, NULL);
   return rc;
+}
+
+/* given a hash that defines a set of files, return list of files */
+redset_filelist redset_lofi_filelist(const kvtree* hash)
+{
+  /* lookup number of files this process wrote */
+  int num_files = 0;
+  if (kvtree_util_get_int(hash, "FILES", &num_files) != REDSET_SUCCESS) {
+    redset_abort(-1, "Failed to read number of files from hash @ %s:%d",
+      __FILE__, __LINE__
+    );
+  }
+
+  /* allocate arrays to hold filenames */
+  const char** filenames = (const char**) REDSET_MALLOC(num_files * sizeof(char*));
+
+  /* open each of our files */
+  int i;
+  kvtree* files_hash = kvtree_get(hash, "FILE");
+  for (i = 0; i < num_files; i++) {
+    /* get file name of this file */
+    kvtree* index_hash = kvtree_getf(files_hash, "%d", i);
+    kvtree_elem* elem = kvtree_elem_first(index_hash);
+    const char* file_name = kvtree_elem_key(elem);
+
+    /* copy the full filename */
+    filenames[i] = strdup(file_name);
+    if (filenames[i] == NULL) {
+      redset_abort(-1, "Failed to copy filename %s @ %s:%d",
+        file_name, __FILE__, __LINE__
+      );
+    }
+  }
+
+  redset_list* list = (redset_list*) REDSET_MALLOC(sizeof(redset_list));
+  list->count = num_files;
+  list->files = filenames;
+
+  return list;
 }
