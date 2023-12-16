@@ -578,7 +578,6 @@ int redset_reedsolomon_decode(
   size_t chunk_size)
 {
   int i;
-  int j;
 
   int rc = REDSET_SUCCESS;
 
@@ -820,9 +819,6 @@ int redset_recover_rs_rebuild(
     }
   }
 
-  /* size of header as encoded in redundancy file */
-  off_t header_size = 0;
-
   /* exchange headers and open each of our files for reading or writing */
   kvtree* current_hash = NULL;
   kvtree* send_hash = NULL;
@@ -839,9 +835,6 @@ int redset_recover_rs_rebuild(
 
     /* read in the header */
     kvtree_read_fd(chunk_file, fd_chunk, header);
-
-    /* get offset into file immediately following the header */
-    header_size = lseek(fd_chunk, 0, SEEK_CUR);
 
     /* get file info for this rank */
     current_hash = kvtree_getf(header, "%s %d", REDSET_KEY_COPY_RS_DESC, d->rank);
@@ -977,9 +970,6 @@ int redset_recover_rs_rebuild(
 
     /* write chunk file header */
     kvtree_write_fd(chunk_file, fd_chunk, header);
-
-    /* get offset into file immediately following the header */
-    header_size = lseek(fd_chunk, 0, SEEK_CUR);
   }
 
   kvtree_delete(&recv_hash);

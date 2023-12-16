@@ -350,7 +350,6 @@ static int reduce_rs_pthread_teardown(threadset_t* tset)
   int ret = REDSET_SUCCESS;
 
   /* signal each thread with 0 work to indicate it should exit */
-  size_t offset = 0;
   for (i = 0; i < tset->num; i++) {
     pthread_mutex_lock(&tset->data[i].mutex);
     tset->data[i].n = 0;
@@ -371,11 +370,10 @@ static int reduce_rs_pthread_teardown(threadset_t* tset)
   }
 
   /* free condition variables and mutexes */
-  int rc;
   for (i = 0; i < tset->num; i++) {
-    rc = pthread_cond_destroy(&tset->data[i].cond_thread);
-    rc = pthread_cond_destroy(&tset->data[i].cond_main);
-    rc = pthread_mutex_destroy(&tset->data[i].mutex);
+    pthread_cond_destroy(&tset->data[i].cond_thread);
+    pthread_cond_destroy(&tset->data[i].cond_main);
+    pthread_mutex_destroy(&tset->data[i].mutex);
   }
 
   /* free memory in data structure */
