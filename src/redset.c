@@ -29,6 +29,8 @@
 /** default set size for redset to use */
 int redset_set_size = 8;
 
+int redset_encode_method = REDSET_ENCODE_CPU;
+
 int redset_init(void)
 {
   /* read our hostname */
@@ -41,6 +43,23 @@ int redset_init(void)
 
   /* set MPI buffer size */
   redset_mpi_buf_size = 1024 * 1024;
+
+  const char* val = getenv("REDSET_ENCODE");
+  if (val != NULL) {
+    if (strcmp(val, "CPU") == 0) {
+      redset_encode_method = REDSET_ENCODE_CPU;
+    } else if (strcmp(val, "OPENMP") == 0) {
+      redset_encode_method = REDSET_ENCODE_OPENMP;
+    } else if (strcmp(val, "PTHREADS") == 0) {
+      redset_encode_method = REDSET_ENCODE_PTHREADS;
+    } else if (strcmp(val, "CUDA") == 0) {
+      redset_encode_method = REDSET_ENCODE_CUDA;
+    } else {
+      redset_abort(-1, "Unknown encode type %s in REDSET_ENCODE @ %s:%d",
+        val, __FILE__, __LINE__
+      );
+    }
+  }
 
   /* set our global rank */
   MPI_Comm_rank(MPI_COMM_WORLD, &redset_rank);

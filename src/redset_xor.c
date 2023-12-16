@@ -8,9 +8,9 @@
 
 #include "config.h"
 
-#ifdef HAVE_OMP
+#ifdef HAVE_OPENMP
 #include <omp.h>
-#endif /* HAVE_OMP */
+#endif /* HAVE_OPENMP */
 
 #include "mpi.h"
 
@@ -396,15 +396,28 @@ int redset_apply_xor(
   kvtree_write_fd(chunk_file, fd_chunk, header);
   kvtree_delete(&header);
 
+  switch (redset_encode_method) {
 #ifdef HAVE_CUDA
-  rc = redset_xor_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
-#else
-#ifdef HAVE_PTHREADS
-  rc = redset_xor_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
-#else
-  rc = redset_xor_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
-#endif /* HAVE_PTHREADS */
+  case REDSET_ENCODE_CUDA:
+    rc = redset_xor_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
 #endif /* HAVE_CUDA */
+#ifdef HAVE_PTHREADS
+  case REDSET_ENCODE_PTHREADS:
+    rc = redset_xor_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
+#endif /* HAVE_PTHREADS */
+#ifdef HAVE_OPENMP
+  case REDSET_ENCODE_OPENMP: /* OpenMP pragmas are in CPU code */
+#endif /* HAVE_OPENMP */
+  case REDSET_ENCODE_CPU:
+    rc = redset_xor_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
+  default:
+    redset_abort(-1, "Unsupported encode method specified for XOR %d %s @ %s:%d",
+      redset_encode_method, chunk_file, __FILE__, __LINE__
+    );
+  }
 
   /* close my chunkfile, with fsync */
   if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
@@ -429,7 +442,7 @@ static int redset_xor_decode(
   const redset_base* d,
   int root,
   redset_lofi rsf,
-  const char* xor_file,
+  const char* chunk_file,
   int fd_chunk,
   size_t chunk_size)
 {
@@ -470,7 +483,7 @@ static int redset_xor_decode(
           offset += count;
         } else {
           /* for this chunk, read data from the XOR file */
-          if (redset_read_attempt(xor_file, fd_chunk, send_buf, count) != count) {
+          if (redset_read_attempt(chunk_file, fd_chunk, send_buf, count) != count) {
             /* read failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -499,7 +512,7 @@ static int redset_xor_decode(
           offset += count;
         } else {
           /* for this chunk, write data from the XOR file */
-          if (redset_write_attempt(xor_file, fd_chunk, recv_buf, count) != count) {
+          if (redset_write_attempt(chunk_file, fd_chunk, recv_buf, count) != count) {
             /* write failed, make sure we fail this rebuild */
             rc = REDSET_FAILURE;
           }
@@ -634,15 +647,28 @@ int redset_recover_xor_rebuild(
     );
   }
 
+  switch (redset_encode_method) {
 #ifdef HAVE_CUDA
-  rc = redset_xor_decode_gpu(d, root, rsf, xor_file, fd_chunk, chunk_size);
-#else
-#ifdef HAVE_PTHREADS
-  rc = redset_xor_decode_pthreads(d, root, rsf, xor_file, fd_chunk, chunk_size);
-#else
-  rc = redset_xor_decode(d, root, rsf, xor_file, fd_chunk, chunk_size);
-#endif /* HAVE_PTHREADS */
+  case REDSET_ENCODE_CUDA:
+    rc = redset_xor_decode_gpu(d, root, rsf, xor_file, fd_chunk, chunk_size);
+    break;
 #endif /* HAVE_CUDA */
+#ifdef HAVE_PTHREADS
+  case REDSET_ENCODE_PTHREADS:
+    rc = redset_xor_decode_pthreads(d, root, rsf, xor_file, fd_chunk, chunk_size);
+    break;
+#endif /* HAVE_PTHREADS */
+#ifdef HAVE_OPENMP
+  case REDSET_ENCODE_OPENMP: /* OpenMP pragmas are in CPU code */
+#endif /* HAVE_OPENMP */
+  case REDSET_ENCODE_CPU:
+    rc = redset_xor_decode(d, root, rsf, xor_file, fd_chunk, chunk_size);
+    break;
+  default:
+    redset_abort(-1, "Unsupported encode method specified for XOR %d %s @ %s:%d",
+      redset_encode_method, xor_file, __FILE__, __LINE__
+    );
+  }
 
   /* close my chunkfile */
   if (redset_close(xor_file, fd_chunk) != REDSET_SUCCESS) {
