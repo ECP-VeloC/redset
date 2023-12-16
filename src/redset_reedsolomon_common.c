@@ -8,9 +8,9 @@
 
 #include "config.h"
 
-#ifdef HAVE_OMP
+#ifdef HAVE_OPENMP
 #include <omp.h>
-#endif /* HAVE_OMP */
+#endif /* HAVE_OPENMP */
 
 #ifdef REDSET_ENABLE_MPI
 #include "mpi.h"

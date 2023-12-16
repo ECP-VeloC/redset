@@ -233,7 +233,7 @@ static int reduce_rs_pthread_setup(threadset_t* tset)
   /* TODO: launch threads and attach to descriptor, activate via condition variable */
 
   /* compute number of threads to start up */
-  int max_threads = 16;
+  int max_threads = 10;
   int nthreads = redset_get_nprocs();
   if (nthreads > max_threads) {
     nthreads = max_threads;
@@ -392,7 +392,7 @@ static int reduce_rs_pthread_setup3(threadset_t* tset)
   int ret = REDSET_SUCCESS;
 
   /* compute number of threads to start up */
-  int max_threads = 32;
+  int max_threads = 10;
   int nthreads = redset_get_nprocs();
   if (nthreads > max_threads) {
     nthreads = max_threads;

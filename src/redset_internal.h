@@ -31,6 +31,11 @@ extern "C" {
 #define REDSET_KEY_CONFIG_WORLD_SIZE "WRANKS"
 #define REDSET_KEY_CONFIG_WORLD_RANK "WRANK"
 
+#define REDSET_ENCODE_CPU      (1)
+#define REDSET_ENCODE_OPENMP   (2)
+#define REDSET_ENCODE_PTHREADS (3)
+#define REDSET_ENCODE_CUDA     (4)
+
 typedef struct {
   int      enabled;        /* flag indicating whether this descriptor is active */
   int      type;           /* redundancy scheme to apply */
@@ -90,6 +95,9 @@ typedef struct {
 
 /** default set size for redset to use */
 extern int redset_set_size;
+
+/* indicates whether to encode via serial CPU, OpenMP, pthreads, or CUDA */
+extern int redset_encode_method;
 
 #ifdef REDSET_ENABLE_MPI
 int redset_set_partners(

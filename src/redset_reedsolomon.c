@@ -519,15 +519,30 @@ int redset_apply_rs(
   kvtree_write_fd(chunk_file, fd_chunk, header);
   kvtree_delete(&header);
 
+  switch (redset_encode_method) {
 #ifdef HAVE_CUDA
-  rc = redset_reedsolomon_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
-#else
-#ifdef HAVE_PTHREADS
-  rc = redset_reedsolomon_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
-#else
-  rc = redset_reedsolomon_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
-#endif /* HAVE_PTHREADS */
+  case REDSET_ENCODE_CUDA:
+    rc = redset_reedsolomon_encode_gpu(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
 #endif /* HAVE_CUDA */
+
+#ifdef HAVE_PTHREADS
+  case REDSET_ENCODE_PTHREADS:
+    rc = redset_reedsolomon_encode_pthreads(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
+#endif /* HAVE_PTHREADS */
+
+#ifdef HAVE_OPENMP
+  case REDSET_ENCODE_OPENMP: /* OpenMP pragmas are in CPU code */
+#endif /* HAVE_OPENMP */
+  case REDSET_ENCODE_CPU:
+    rc = redset_reedsolomon_encode(d, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
+  default:
+    redset_abort(-1, "Unsupported encode method specified for RS %d %s @ %s:%d",
+      redset_encode_method, chunk_file, __FILE__, __LINE__
+    );
+  }
 
   /* close my chunkfile, with fsync */
   if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
@@ -978,11 +993,27 @@ int redset_recover_rs_rebuild(
     );
   }
 
+  switch (redset_encode_method) {
 #ifdef HAVE_CUDA
-  rc = redset_reedsolomon_decode_gpu(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
-#else
-  rc = redset_reedsolomon_decode(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
+  case REDSET_ENCODE_CUDA:
+    rc = redset_reedsolomon_decode_gpu(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
 #endif /* HAVE_CUDA */
+
+#ifdef HAVE_PTHREADS
+  case REDSET_ENCODE_PTHREADS: /* missing pthread decode, fall back to CPU */
+#endif /* HAVE_PTHREADS */
+#ifdef HAVE_OPENMP
+  case REDSET_ENCODE_OPENMP: /* OpenMP pragmas are in CPU code */
+#endif /* HAVE_OPENMP */
+  case REDSET_ENCODE_CPU:
+    rc = redset_reedsolomon_decode(d, missing, rebuild_ranks, need_rebuild, rsf, chunk_file, fd_chunk, chunk_size);
+    break;
+  default:
+    redset_abort(-1, "Unsupported encode method specified for RS %d %s @ %s:%d",
+      redset_encode_method, chunk_file, __FILE__, __LINE__
+    );
+  }
 
   /* close my chunkfile */
   if (redset_close(chunk_file, fd_chunk) != REDSET_SUCCESS) {
