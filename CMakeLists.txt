@@ -42,7 +42,7 @@ IF(ENABLE_CUDA)
     # we define the project languages conditionally since listing CUDA
     # causes the github actions build to fail since nvcc is not available
     # and adding nvcc is complicated
-    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C CUDA)
+    PROJECT(REDSET VERSION 0.4.0 LANGUAGES C CUDA)
 
     # if nvcc can be added, then one can move the project line
     # back to the top, always list CUDA, and selectively enable it
@@ -51,7 +51,7 @@ IF(ENABLE_CUDA)
 
     SET(HAVE_CUDA TRUE)
 ELSE(ENABLE_CUDA)
-    PROJECT(REDSET VERSION 0.3.0 LANGUAGES C)
+    PROJECT(REDSET VERSION 0.4.0 LANGUAGES C)
 ENDIF(ENABLE_CUDA)
 
 # Find Packages & Files
