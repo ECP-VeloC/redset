@@ -23,7 +23,7 @@ extern "C" {
 
 #define REDSET_SUCCESS (0)
 
-#define REDSET_VERSION "0.3.0"
+#define REDSET_VERSION "0.4.0"
 
 #define REDSET_COPY_NULL    (0)
 #define REDSET_COPY_SINGLE  (1)
